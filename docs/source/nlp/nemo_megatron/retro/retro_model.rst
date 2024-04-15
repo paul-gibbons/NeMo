@@ -12,6 +12,8 @@ Retro also provides the flexibility to update the
 knowledge stored in LMs `(Wang et al., 2023a) <https://arxiv.org/abs/2304.06762>`_
 by updating the retrieval database without training LMs again. 
 
+For the legacy RETRO model doc, please see `NeMo RETRO Model (Legacy) <https://github.com/NVIDIA/NeMo/blob/main/docs/source/nlp/nemo_megatron/retro/retro_model_legacy.rst>`_.
+
 Quick start
 ************
 Steps below demonstrate the steps to pre-processing data, training and evaluating a NeMo RETRO model.
