@@ -76,29 +76,38 @@ An example RETRO pre-training script is:
 
 .. code-block:: bash
 
-    python examples/nlp/language_modeling/megatron_retro_pretraining.py \
-        trainer.devices=8 \
-        trainer.num_nodes=2 \
-        trainer.accelerator=gpu \
-        trainer.max_steps=800000 \
-        trainer.precision=16 \
-        exp_manager.exp_dir=/result/retro_model \
-        model.apply_query_key_layer_scaling=False \
-        model.tensor_model_parallel_size=8 \
-        model.optim.name=adamw \
-        model.enc_num_layers=2 \
-        model.dec_num_layers=32 \
-        model.enc_cross_attention=[0] \
-        model.dec_cross_attention=[8,11,14,17,20,23,26,29,31] \
-        model.hidden_size=4096 \
-        model.ffn_hidden_size=16384 \
-        model.num_attention_heads=32 \
-        model.tokenizer.merge_file=/dataset/gpt2-merges.txt \
-        model.tokenizer.vocab_file=/dataset/gpt2-vocab.json \
-        model.data.data_prefix=[/result/pubmed_eval_text_document] \
-        model.data.knn_index=[dataset/pubmed_knn_final.save] \
-        model.data.retrieval_prefix=/result/pubmed_eval_text_document \
-        model.micro_batch_size=8
+        python /lustre/fsw/coreai_dlalgo_genai/huvu/codes/retro/huy_nemo/NeMo_retro/examples/nlp/language_modeling/megatron_retro_pretraining.py \
+            trainer.num_nodes=1 \
+            trainer.devices=8 \
+            trainer.precision=bf16 \
+            trainer.accelerator=gpu \
+            model.data.data_prefix=["none"] \
+            exp_manager.exp_dir=/lustre/fsw/coreai_dlalgo_genai/huvu/data/retro/mcore_retro_dataloader/nemo_cyclic_eos_wiki_ca5b3989 \
+            exp_manager.create_wandb_logger=True \
+            exp_manager.wandb_logger_kwargs.name=mcore_retro_testing_junks \
+            exp_manager.wandb_logger_kwargs.project=mcore_retro_interactive \
+            +exp_manager.wandb_logger_kwargs.resume=False \
+            model.mcore_gpt=True \
+            model.tensor_model_parallel_size=1 \
+            model.pipeline_model_parallel_size=1 \
+            model.optim.name=distributed_fused_adam \
+            model.retro.retro_project_dir=/lustre/fsw/coreai_dlalgo_genai/huvu/data/retro/pretrain_data/wiki-core-bert-fast \
+            model.data.num_workers=4 \
+            ++cluster_type=BCP \
+            model.micro_batch_size=4 \
+            model.data.shuffle_documents=False \
+            trainer.val_check_interval=10 \
+            model.init_method_std=0.023 \
+            model.optim.lr=6.0e-4 \
+            model.optim.weight_decay=0.1 \
+            model.optim.sched.name=CosineAnnealing \
+            model.optim.sched.min_lr=6.0e-5 \
+            model.optim.sched.max_steps=650000 \
+            model.megatron_amp_O2=True \
+            model.data.dataloader_type=cyclic \
+            model.data.splits_string=\'98,2,0\' \
+            trainer.max_steps=750000
+
 
 During the training, launch Tensorboard to monitor training like so:
 
@@ -122,27 +131,27 @@ We have built a simple web client that makes it easy for users to play around wi
 
 .. code-block:: bash
 
-    python examples/nlp/language_modeling/megatron_retro_eval.py \
-        trainer.devices=8 \
-        trainer.num_nodes=1 \
-        trainer.accelerator=gpu \
-        trainer.precision=16 \
-        retro_model_file=megatron_retro.nemo \
-        tensor_model_parallel_size=8 \
-        pipeline_model_parallel_size=1 \
-        retrieval_service.sentence_bert.devices=\'0,1,2,3,4,5,6,7\' \
-        retrieval_service.services.0.faiss_devices=\'0,1,2,3,4,5,6,7\' \
-        retrieval_service.services.1.faiss_devices=\'0,1,2,3,4,5,6,7\' \
-        retrieval_service.services.0.faiss_index=/result/pubmed_faiss_final.index \
-        retrieval_service.services.0.retrieval_index=/result/pubmed_eval_text_document \
-        retrieval_service.neighbors=2 \
-        retrieval_service.pad_tokens=True \
-        retrieval_service.store_retrieved=True \
-        server=True \
-        web_server=True \
-        share=True \
-        username=test \
-        password=test123
+        python /lustre/fsw/coreai_dlalgo_genai/huvu/codes/retro/huy_nemo/NeMo_retro_eval/examples/nlp/language_modeling/megatron_retro_eval.py \
+            checkpoint_dir=/lustre/fsw/coreai_dlalgo_genai/huvu/data/retro/mcore_retro_dataloader/mcore_retro_mlmcheckpoint_converting/megatron_gpt/checkpoints \
+            checkpoint_name=\'megatron_gpt--val_loss=2.36-step=2-consumed_samples=512.0-last\' \
+            inference.greedy=False \
+            inference.add_BOS=False \
+            inference.tokens_to_generate=10 \
+            inference.temperature=1.0 \
+            trainer.devices=1 \
+            trainer.num_nodes=1 \
+            trainer.accelerator=gpu \
+            trainer.precision=32 \
+            megatron_amp_O2=False \
+            ++cluster_type=BCP \
+            tensor_model_parallel_size=-1 \
+            pipeline_model_parallel_size=-1 \
+            inference.retro_inference.retro_gpt_retrieved_length=128 \
+            inference.retro_inference.retro_num_neighbors=3 \
+            inference.retro_inference.ft_neighbours=0 \
+            inference.retro_inference.reuse_top=False \
+            prompt="Question: Who is the current president of the US in 2024? Answer:" \
+            neighbors=["The president of the US in 2024 is Joe Biden","The president of the US in 2024 is Joe Biden","The president of the US in 2024 is Joe Biden"]
 
 Set the retro_model_file to use the nemo file generated in the pre-training step. After launching the server, copy-paste the URL from 
 the terminal into your browser. Use the specified username and password to log in and have fun experimenting with the RETRO model.
