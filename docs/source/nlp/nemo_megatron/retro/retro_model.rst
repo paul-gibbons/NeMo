@@ -1,7 +1,7 @@
 NeMo RETRO Model
 ================
 
-Retro [(Borgeaud et al., 2022)](https://arxiv.org/abs/2112.04426) is an autoregressive decoder-only language model (LM)
+Retro `(Borgeaud et al., 2022) <https://arxiv.org/abs/2112.04426>`_ is an autoregressive decoder-only language model (LM)
 pretrained with retrieval-augmentation.
 Retro features practical scalability to support large-scale pretraining from scratch by retrieving from trillions of
 tokens.
@@ -9,7 +9,7 @@ Pretraining with retrieval provides a more efficient storage mechanism of factua
 factual knowledge implicitly within the network's parameters, thus largely reducing model parameters while achieving
 lower perplexity than standard GPT.
 Retro also provides the flexibility to update the
-knowledge stored in LMs [(Wang et al., 2023a)](https://arxiv.org/abs/2304.06762)
+knowledge stored in LMs `(Wang et al., 2023a) <https://arxiv.org/abs/2304.06762>`_
 by updating the retrieval database without training LMs again. 
 
 Quick start
@@ -71,9 +71,9 @@ The main output of this stage are:
 Train NeMo RETRO Model
 -----------------------
 
-Once the data (include training samples and pre-retrieved neighbors) are prepared, we are ready to train the RETRO model. The training process will use the output directory from the data preparation step. We set the path to this directory at the ``retro.retro_project_dir`` variable in the training configuration yaml file. Many of the data hyperparameters will be retrieved from the ``config.json`` file in this directory, including data splits, sequence length, chunk length, number of training and validating samples, tokenizer, etc.
+Once the data (include training samples and pre-retrieved neighbors) are prepared, we are ready to train the RETRO model. The training process will use the output directory from the data preparation step. We set the path to this directory at the ``retro.retro_project_dir`` argument. Many of the data hyperparameters will be retrieved from the ``config.json`` file in this directory, including data splits, sequence length, chunk length, number of training and validating samples, tokenizer, etc.
 
-The table below lists some of the common parameters that can be configured for model pre-training. Many of these values are set in ``examples/nlp/language_modeling/conf/megatron_retro_config.yaml``, which is used when training unless being overriden in the running command.
+The table below lists some of the common architecture and optimizer parameters that can be configured for model pre-training. Many of these values are set in ``examples/nlp/language_modeling/conf/megatron_retro_config.yaml``, which is used when training unless being overriden in the running command.
 
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 | **Parameter**                    | **Default** | **Description**                                                                        |
@@ -102,10 +102,10 @@ The table below lists some of the common parameters that can be configured for m
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 | model.attention_dropout          | 0.1         | dropout probability in the attention layer                                             |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
-| model.ffn_dropout                | 0.1          | dropout probability in the feed-forward layer                                          |
+| model.ffn_dropout                | 0.1         | dropout probability in the feed-forward layer                                          |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 
-An example RETRO pre-training script is:
+Below is an example RETRO pre-training script. The rest of the arguments values are retrieved from ``examples/nlp/language_modeling/conf/megatron_retro_config.yaml``.
 
 .. code-block:: bash
 
@@ -139,7 +139,6 @@ An example RETRO pre-training script is:
             model.optim.sched.max_steps=650000 \
             model.optim.name=distributed_fused_adam \
 
-
 During the training, we can monitor the process with Weights and Biases (WandB) by setting ``exp_manager.create_wandb_logger=True`` and set relevant wandb arguments.
 After training, the model distributed checkpoint directory can be found at the result checkpoint directory.
 
@@ -147,8 +146,10 @@ Run NeMo RETRO Model Inference
 -------------------------------
 
 Once the NeMo RETRO model has been trained, we can put it into inference mode and experiment with it. 
-During inference, we are not limited to the indexed corpus to retrieve relevant chunks, but can directly provide relevant contexts to the prompt through the argument ``neighbors``.
+During inference, we are not limited to the indexed corpus to retrieve relevant chunks, but can directly provide any relevant contexts to the prompt through the argument ``neighbors``.
 Implementation-wise, when inferencing, input for RETRO is set up differently than when in training. Particularly, the model's input will be presented as comprising of two chunks only, one for the prompt, and one for the answer to be generated. These chunks don't necessarily have the length of 64 as in training, but will have the length of the tokenized prompt. For each prompt, context neighbors can be provided. These neighbors will correspond to the first chunk and will be passed through RETRO's encoder to generate text for the second chunk.
+
+Below is an example RETRO pre-training script. The rest of the arguments values are retrieved from ``examples/nlp/language_modeling/conf/megatron_retro_inference.yaml``.
 
 .. code-block:: bash
 
@@ -167,5 +168,3 @@ Implementation-wise, when inferencing, input for RETRO is set up differently tha
             inference.retro_inference.retro_num_neighbors=2 \
             prompt="sample prompt" \
             neighbors=["sample neighbor 1","sample neighbor 2"]
-
-Many of the inference configuration values are set in ``examples/nlp/language_modeling/conf/megatron_retro_inference.yaml``, which is used when inferencing unless being overriden in the running command.
