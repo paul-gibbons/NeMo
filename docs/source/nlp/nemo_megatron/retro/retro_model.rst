@@ -71,9 +71,9 @@ The main output of this stage are:
 Train NeMo RETRO Model
 -----------------------
 
-Once the data (include training samples and pre-retrieved neighbors) are prepared, we are ready to train the RETRO model. The training process will use the output directory from the data preparation step. We set the path to this directory at the retro.retro_project_dir variable in the training configuration yaml file. Many of the data hyperparameters will be retrieved from the config.json file in this directory, including data splits, sequence length, chunk length, number of training and validating samples, tokenizer, etc.
+Once the data (include training samples and pre-retrieved neighbors) are prepared, we are ready to train the RETRO model. The training process will use the output directory from the data preparation step. We set the path to this directory at the ``retro.retro_project_dir`` variable in the training configuration yaml file. Many of the data hyperparameters will be retrieved from the ``config.json`` file in this directory, including data splits, sequence length, chunk length, number of training and validating samples, tokenizer, etc.
 
-The table below lists some of the common parameters that can be configured for model pre-training. Many of these values are set in `examples/nlp/language_modeling/conf/megatron_retro_config.yaml`, in which used when training unless being overriden in the running command.
+The table below lists some of the common parameters that can be configured for model pre-training. Many of these values are set in ``examples/nlp/language_modeling/conf/megatron_retro_config.yaml``, which is used when training unless being overriden in the running command.
 
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 | **Parameter**                    | **Default** | **Description**                                                                        |
@@ -140,44 +140,32 @@ An example RETRO pre-training script is:
             model.optim.name=distributed_fused_adam \
 
 
-During the training, we can monitor the process with Weights and Biases (WandB) by setting `exp_manager.create_wandb_logger=True` and set relevant `wandb` arguments.
+During the training, we can monitor the process with Weights and Biases (WandB) by setting ``exp_manager.create_wandb_logger=True`` and set relevant wandb arguments.
 After training, the model distributed checkpoint directory can be found at the result checkpoint directory.
 
 Run NeMo RETRO Model Inference
 -------------------------------
 
 Once the NeMo RETRO model has been trained, we can put it into inference mode and experiment with it. 
-During inference, we are not limited to the indexed corpus to retrieve relevant chunks, but can directly provide relevant contexts to the prompt through the argument `neighbors`.
+During inference, we are not limited to the indexed corpus to retrieve relevant chunks, but can directly provide relevant contexts to the prompt through the argument ``neighbors``.
 Implementation-wise, when inferencing, input for RETRO is set up differently than when in training. Particularly, the model's input will be presented as comprising of two chunks only, one for the prompt, and one for the answer to be generated. These chunks don't necessarily have the length of 64 as in training, but will have the length of the tokenized prompt. For each prompt, context neighbors can be provided. These neighbors will correspond to the first chunk and will be passed through RETRO's encoder to generate text for the second chunk.
 
 .. code-block:: bash
 
-        python /lustre/fsw/coreai_dlalgo_genai/huvu/codes/retro/huy_nemo/NeMo_retro_eval/examples/nlp/language_modeling/megatron_retro_eval.py \
-            checkpoint_dir=/lustre/fsw/coreai_dlalgo_genai/huvu/data/retro/mcore_retro_dataloader/mcore_retro_mlmcheckpoint_converting/megatron_gpt/checkpoints \
-            checkpoint_name=\'megatron_gpt--val_loss=2.36-step=2-consumed_samples=512.0-last\' \
-            inference.greedy=False \
-            inference.add_BOS=False \
-            inference.tokens_to_generate=10 \
-            inference.temperature=1.0 \
+        python /examples/nlp/language_modeling/megatron_retro_eval.py \
+            checkpoint_dir=/path/to/checkpoints \
+            checkpoint_name=/checkpoint_name \
             trainer.devices=1 \
             trainer.num_nodes=1 \
             trainer.accelerator=gpu \
             trainer.precision=32 \
             megatron_amp_O2=False \
-            ++cluster_type=BCP \
-            tensor_model_parallel_size=-1 \
-            pipeline_model_parallel_size=-1 \
-            inference.retro_inference.retro_gpt_retrieved_length=128 \
-            inference.retro_inference.retro_num_neighbors=3 \
-            inference.retro_inference.ft_neighbours=0 \
-            inference.retro_inference.reuse_top=False \
-            prompt="Question: Who is the current president of the US in 2024? Answer:" \
-            neighbors=["The president of the US in 2024 is Joe Biden","The president of the US in 2024 is Joe Biden","The president of the US in 2024 is Joe Biden"]
+            inference.tokens_to_generate=10 \
+            inference.greedy=False \
+            inference.add_BOS=False \
+            inference.temperature=1.0 \
+            inference.retro_inference.retro_num_neighbors=2 \
+            prompt="sample prompt" \
+            neighbors=["sample neighbor 1","sample neighbor 2"]
 
-References
-************
-
-.. bibliography:: ../../nlp_all.bib
-    :style: plain
-    :labelprefix: nlp-retro
-    :keyprefix: nlp-retro-
+Many of the inference configuration values are set in ``examples/nlp/language_modeling/conf/megatron_retro_inference.yaml``, which is used when inferencing unless being overriden in the running command.
