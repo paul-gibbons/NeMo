@@ -26,13 +26,60 @@ Steps below demonstrate training and evaluating a NeMo RETRO model
 Data pre-processing
 -------------------
 
+For the data preparation step, we refer to `Megatron-LM Github <https://github.com/NVIDIA/Megatron-LM/>`_ repository, which contains the scripts and detailed instructions of the whole preprocessing process at `RETRO Data Preparation <https://github.com/NVIDIA/Megatron-LM/blob/0fecd76e995c136021d478c6c52caa57c2f9aa25/tools/retro/build_db.md>`_. The main stages of the process are summarized below. 
+
+The output result of the preparation step is a processed RETRO data directory ready to be used for pre-training. Particularly, it  will contain the main following files and subdirectories:
+
+* ``config.json``: containing the hyperparameters used in the data preparation step, which will be retrieved to use in the pre-training step for consistency. For example: sample length, chunk length, data splits, tokenizer files, etc.
+* ``data``: containing the original data before any preprocessing.
+* ``tokenizer``: containing tokenizer files used in the preparation step.
+* ``db``: containing the chunk database of processed and chunked text used for retrieving neighbors. 
+* ``index``: containing the Faiss index of the chunk database for retrieval.
+* ``query``: containing the queried neighboring chunks for all training samples.
+
+Summary of Main Stages
+%%%%%%%%%%%%%
+
+The data preparation process contains the following main stages:
+
+Build Retrieval Chunk Database
+##############################
+
+This stage involves creating a database of text chunks from a corpus such as Wikipedia to be used for retrievals. The chunks are non-overlapping and extracted from the original GPT token dataset, with each chunk traditionally being 64 tokens in length. The database is stored as a 2-D array and is not a relational database. 
+
+The main output of this stage are:
+
+* ``/db/merged/train.hdf5``: the database containing all processed and chunked text.
+* ``/db/merged/sampled.hdf5``: the database containing a small portion of all chunks, only used for training the index in the next stage.
+
+Build Index for Similarity Search
+#################################
+
+The second stage is to build a search index using Faiss, a library for efficient similarity search. The index is trained on a subset of the chunks ``sampled.hdf5`` from the database. After training, all chunks are added to the index to enable querying. The index accepts 1-D floating point vectors, so chunks must be embedded using Bert embeddings before they can be added to the index. Particularly, the stage is comprised of two sub-stages:
+
+    \- Extract BERT embeddings from the sampled chunk database (``sampled.hdf5``) and use them to train a Faiss index.
+    
+    \- Extract BERT embeddings for each chunk in the all chunks database (``train.hdf5``) and add them to the trained Faiss index.
+
+The main output of this stage are:
+
+* ``/index/<RETRO_INDEX_TYPE>/<RETRO_INDEX_STR>/added.faissindex``: the trained index, with all chunks in the database added to it
+
+Query Pretraining Neighbors
+###########################
+
+For training RETRO, to speed up the Retro pretraining process, we will pre-retrieve neighbors for all training samples instead of retrieving them on-the-fly. In this stage, the pretraining datasets are processed to find and save k-nearest neighbors for each chunk in each sample. The neighbors are saved to disk and labeled with unique properties to ensure they match the pretraining configuration. Query-time hyperparameters can be tuned to improve the quality of the neighbors.
+
+The main output of this stage are:
+
+* ``train_<UNIQUE_HASH>``: directory containing retrieved neighbors for all training samples.
+* ``valid_<UNIQUE_HASH>``: directory containing retrieved neighbors for all validating samples.
 
 Train NeMo RETRO Model
 -----------------------
 
-Once the training data, retrieval data, KNN index, and Faiss index are prepared, we are ready to train the RETRO model. In the NeMo implementation, 
-the RETRO model can be pre-trained with or without the `mu-Transfer <https://openreview.net/pdf?id=Bx6qKuBM2AD>`_ :cite:`nlp-retro-yang2022tensor` feature. We will introduce both ways.
-
+Once the training data, retrieval data, KNN index, and Faiss index are prepared, we are ready to train the RETRO model.
+The training process will use the output directory from the data preparation step. We set the path to this directory at the retro.retro_project_dir variable in the training configuration yaml file. Many of the data hyperparameters will be retrieved from the config.json file in this directory, including data splits, sequence length, chunk length, number of training and validating samples, tokenizer, etc.
 
 The table below lists some of the common parameters that can be configured for model pre-training.
 
@@ -127,7 +174,7 @@ During inference, we are not limited to the static Faiss index that we built ear
 We can feed any external data to the model as retrieval context. NeMo RETRO implementation supports dynamic retrieval service, 
 allowing users to add, reset, and query new documents on the fly.
 
-We have built a simple web client that makes it easy for users to play around with the model. Here is an example script to launch the server:
+When inferencing, input for RETRO is set up differently than when in training. Particularly, the model's input will be presented as comprising of two chunks only, one for the prompt, and one for the answer to be generated. These chunks don't necessarily have the length of 64 as in training, but will have the length of the tokenized prompt. For each prompt, context neighbors can be provided. These neighbors will correspond to the first chunk and will be passed through RETRO's encoder to generate text for the second chunk.
 
 .. code-block:: bash
 
