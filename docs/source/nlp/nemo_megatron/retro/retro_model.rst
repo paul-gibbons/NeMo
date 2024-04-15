@@ -1,32 +1,25 @@
 NeMo RETRO Model
 ================
 
-The Retrieval-Enhanced Transformer (RETRO) model is an autoregressive language model that takes into account document chunks retrieved from a large 
-corpus when making predictions. The RETRO model has a similar architecture to the GPT model, but it includes an encoder that encodes the retrieved 
-context and cross-attention layers that integrate the context to improve the model's output. Below is a simple diagram of the RETRO model architecture.
-
-.. image:: images/arch.png
-    :align: center
-    :width: 800px
-    :alt: RETRO model architecture
-
-For more detailed information on the model, please refer to the `RETRO paper <https://arxiv.org/abs/2112.04426>`_ :cite:`nlp-retro-borgeaud2021improving` by Deepmind. 
-The NeMo RETRO Model is an open-source implementation of the paper, and it has the following differences/features compared to Deepmind's proposed implementation:
-
-1. The NeMo RETRO Model is built on top of NeMo Megatron code, allowing for efficient training of large language models in a cluster environment.
-2. The NeMo RETRO Model uses `Faiss <https://github.com/facebookresearch/faiss>`_ :cite:`nlp-retro-jegou2022faiss` as the K$N search library, which can be accelerated by GPUs. 
-3. The NeMo RETRO uses `RoPe relative positional encoding <https://arxiv.org/abs/2104.09864>`_ :cite:`nlp-retro-su2021roformer`. 
-4. The NeMo RETRO uses `SentenceTransformers <https://www.sbert.net>`_ :cite:`nlp-retro-reimers2019sentence` as the retriever encoder.
-5. The NeMo RETRO supports `mu-Transfer <https://openreview.net/pdf?id=Bx6qKuBM2AD>`_ :cite:`nlp-retro-yang2022tensor`, allowing for scalable training of the RETRO model via Zero-Shot Hyperparameter Transfer.
+Retro [(Borgeaud et al., 2022)](https://arxiv.org/abs/2112.04426) is an autoregressive decoder-only language model (LM)
+pretrained with retrieval-augmentation.
+Retro features practical scalability to support large-scale pretraining from scratch by retrieving from trillions of
+tokens.
+Pretraining with retrieval provides a more efficient storage mechanism of factual knowledge, when compared to storing
+factual knowledge implicitly within the network's parameters, thus largely reducing model parameters while achieving
+lower perplexity than standard GPT.
+Retro also provides the flexibility to update the
+knowledge stored in LMs [(Wang et al., 2023a)](https://arxiv.org/abs/2304.06762)
+by updating the retrieval database without training LMs again. 
 
 Quick start
 ************
-Steps below demonstrate training and evaluating a NeMo RETRO model
+Steps below demonstrate the steps to pre-processing data, training and evaluating a NeMo RETRO model.
 
 Data pre-processing
 -------------------
 
-For the data preparation step, we refer to `Megatron-LM Github <https://github.com/NVIDIA/Megatron-LM/>`_ repository, which contains the scripts and detailed instructions of the whole preprocessing process at `RETRO Data Preparation <https://github.com/NVIDIA/Megatron-LM/blob/0fecd76e995c136021d478c6c52caa57c2f9aa25/tools/retro/build_db.md>`_. The main stages of the process are summarized below. 
+For the detailed data preparation step, we refer to `Megatron-LM Github <https://github.com/NVIDIA/Megatron-LM/>`_ repository, which contains the scripts and detailed instructions of the whole preprocessing process at `RETRO Data Preparation <https://github.com/NVIDIA/Megatron-LM/blob/0fecd76e995c136021d478c6c52caa57c2f9aa25/tools/retro/build_db.md>`_. The main stages of the process are summarized below. 
 
 The output result of the preparation step is a processed RETRO data directory ready to be used for pre-training. Particularly, it  will contain the main following files and subdirectories:
 
@@ -37,8 +30,6 @@ The output result of the preparation step is a processed RETRO data directory re
 * ``index``: containing the Faiss index of the chunk database for retrieval.
 * ``query``: containing the queried neighboring chunks for all training samples.
 
-Summary of Main Stages
-%%%%%%%%%%%%%
 
 The data preparation process contains the following main stages:
 
@@ -75,13 +66,14 @@ The main output of this stage are:
 * ``train_<UNIQUE_HASH>``: directory containing retrieved neighbors for all training samples.
 * ``valid_<UNIQUE_HASH>``: directory containing retrieved neighbors for all validating samples.
 
+
+
 Train NeMo RETRO Model
 -----------------------
 
-Once the training data, retrieval data, KNN index, and Faiss index are prepared, we are ready to train the RETRO model.
-The training process will use the output directory from the data preparation step. We set the path to this directory at the retro.retro_project_dir variable in the training configuration yaml file. Many of the data hyperparameters will be retrieved from the config.json file in this directory, including data splits, sequence length, chunk length, number of training and validating samples, tokenizer, etc.
+Once the data (include training samples and pre-retrieved neighbors) are prepared, we are ready to train the RETRO model. The training process will use the output directory from the data preparation step. We set the path to this directory at the retro.retro_project_dir variable in the training configuration yaml file. Many of the data hyperparameters will be retrieved from the config.json file in this directory, including data splits, sequence length, chunk length, number of training and validating samples, tokenizer, etc.
 
-The table below lists some of the common parameters that can be configured for model pre-training.
+The table below lists some of the common parameters that can be configured for model pre-training. Many of these values are set in `examples/nlp/language_modeling/conf/megatron_retro_config.yaml`, in which used when training unless being overriden in the running command.
 
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 | **Parameter**                    | **Default** | **Description**                                                                        |
@@ -94,15 +86,9 @@ The table below lists some of the common parameters that can be configured for m
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 | model.chunk_size                 | 64          | the chunk size used to retrieve                                                        |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
-| model.enc_num_layers             | 4           | total number of encoder layers                                                         |
+| model.enc_num_layers             | 2           | total number of encoder layers                                                         |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
-| model.dec_num_layers             | 6           | total number of decoder layers                                                         |
-+----------------------------------+-------------+----------------------------------------------------------------------------------------+
-| model.enc_cross_attention        | [3]         | layer numbers for cross attention in encoder                                           |
-+----------------------------------+-------------+----------------------------------------------------------------------------------------+
-| model.dec_cross_attention        | [3,4,5]     | layer numbers for chunked cross attention in decoder                                   |
-+----------------------------------+-------------+----------------------------------------------------------------------------------------+
-| model.add_position_embedding     | FALSE       | whether to add the absolute position encoding                                          |
+| model.num_layers                 | 12          | total number of decoder layers                                                         |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 | model.hidden_size                | 768         | model hidden size                                                                      |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
@@ -110,71 +96,59 @@ The table below lists some of the common parameters that can be configured for m
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 | model.num_attention_heads        | 12          | number of attention heads                                                              |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
-| model.init_method_std            | 0.02        | standard deviation of the zero mean normal distribution used for weight initialization |
+| model.init_method_std            | 0.023       | standard deviation of the zero mean normal distribution used for weight initialization |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 | model.hidden_dropout             | 0.1         | dropout probability for hidden state transformer                                       |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 | model.attention_dropout          | 0.1         | dropout probability in the attention layer                                             |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
-| model.ffn_dropout                | 0           | dropout probability in the feed-forward layer                                          |
+| model.ffn_dropout                | 0.1          | dropout probability in the feed-forward layer                                          |
 +----------------------------------+-------------+----------------------------------------------------------------------------------------+
 
 An example RETRO pre-training script is:
 
 .. code-block:: bash
 
-        python /lustre/fsw/coreai_dlalgo_genai/huvu/codes/retro/huy_nemo/NeMo_retro/examples/nlp/language_modeling/megatron_retro_pretraining.py \
+        python /examples/nlp/language_modeling/megatron_retro_pretraining.py \
             trainer.num_nodes=1 \
             trainer.devices=8 \
             trainer.precision=bf16 \
             trainer.accelerator=gpu \
-            model.data.data_prefix=["none"] \
-            exp_manager.exp_dir=/lustre/fsw/coreai_dlalgo_genai/huvu/data/retro/mcore_retro_dataloader/nemo_cyclic_eos_wiki_ca5b3989 \
-            exp_manager.create_wandb_logger=True \
-            exp_manager.wandb_logger_kwargs.name=mcore_retro_testing_junks \
-            exp_manager.wandb_logger_kwargs.project=mcore_retro_interactive \
-            +exp_manager.wandb_logger_kwargs.resume=False \
+            trainer.max_steps=750000
+            trainer.val_check_interval=10 \
+            trainer.precision=16 \
+            exp_manager.exp_dir=/path/to/exp_dir \
             model.mcore_gpt=True \
             model.tensor_model_parallel_size=1 \
             model.pipeline_model_parallel_size=1 \
-            model.optim.name=distributed_fused_adam \
-            model.retro.retro_project_dir=/lustre/fsw/coreai_dlalgo_genai/huvu/data/retro/pretrain_data/wiki-core-bert-fast \
-            model.data.num_workers=4 \
-            ++cluster_type=BCP \
+            model.megatron_amp_O2=True \
+            model.retro.num_layers=12 \
+            model.retro.retro_encoder_num_layers=2 \
+            model.retro.retro_num_retrieved_chunks=2 \
+            model.retro.retro_project_dir=/path/to/retro_workdir \
             model.micro_batch_size=4 \
+            model.data.num_workers=4 \
+            model.data.data_prefix=["none"] \
             model.data.shuffle_documents=False \
-            trainer.val_check_interval=10 \
-            model.init_method_std=0.023 \
+            model.data.dataloader_type=single \
+            model.data.splits_string=\'98,2,0\' \
             model.optim.lr=6.0e-4 \
             model.optim.weight_decay=0.1 \
             model.optim.sched.name=CosineAnnealing \
             model.optim.sched.min_lr=6.0e-5 \
             model.optim.sched.max_steps=650000 \
-            model.megatron_amp_O2=True \
-            model.data.dataloader_type=cyclic \
-            model.data.splits_string=\'98,2,0\' \
-            trainer.max_steps=750000
+            model.optim.name=distributed_fused_adam \
 
 
-During the training, launch Tensorboard to monitor training like so:
-
-.. code-block:: bash
-
-    tensorboard --logdir /result/retro_model --bind_all
-
-.. note:: Weights and Biases (WandB) is supported too. Add ``exp_manager.create_wandb_logger=True`` to the model training arguments to enable it.
-
-After the training, the model nemo file can be found at the result checkpoint directory.
+During the training, we can monitor the process with Weights and Biases (WandB) by setting `exp_manager.create_wandb_logger=True` and set relevant `wandb` arguments.
+After training, the model distributed checkpoint directory can be found at the result checkpoint directory.
 
 Run NeMo RETRO Model Inference
 -------------------------------
 
 Once the NeMo RETRO model has been trained, we can put it into inference mode and experiment with it. 
-During inference, we are not limited to the static Faiss index that we built earlier for KNN queries. 
-We can feed any external data to the model as retrieval context. NeMo RETRO implementation supports dynamic retrieval service, 
-allowing users to add, reset, and query new documents on the fly.
-
-When inferencing, input for RETRO is set up differently than when in training. Particularly, the model's input will be presented as comprising of two chunks only, one for the prompt, and one for the answer to be generated. These chunks don't necessarily have the length of 64 as in training, but will have the length of the tokenized prompt. For each prompt, context neighbors can be provided. These neighbors will correspond to the first chunk and will be passed through RETRO's encoder to generate text for the second chunk.
+During inference, we are not limited to the indexed corpus to retrieve relevant chunks, but can directly provide relevant contexts to the prompt through the argument `neighbors`.
+Implementation-wise, when inferencing, input for RETRO is set up differently than when in training. Particularly, the model's input will be presented as comprising of two chunks only, one for the prompt, and one for the answer to be generated. These chunks don't necessarily have the length of 64 as in training, but will have the length of the tokenized prompt. For each prompt, context neighbors can be provided. These neighbors will correspond to the first chunk and will be passed through RETRO's encoder to generate text for the second chunk.
 
 .. code-block:: bash
 
@@ -199,9 +173,6 @@ When inferencing, input for RETRO is set up differently than when in training. P
             inference.retro_inference.reuse_top=False \
             prompt="Question: Who is the current president of the US in 2024? Answer:" \
             neighbors=["The president of the US in 2024 is Joe Biden","The president of the US in 2024 is Joe Biden","The president of the US in 2024 is Joe Biden"]
-
-Set the retro_model_file to use the nemo file generated in the pre-training step. After launching the server, copy-paste the URL from 
-the terminal into your browser. Use the specified username and password to log in and have fun experimenting with the RETRO model.
 
 References
 ************
