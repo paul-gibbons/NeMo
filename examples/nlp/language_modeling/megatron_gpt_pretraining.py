@@ -38,7 +38,7 @@ def main(cfg) -> None:
     exp_manager(trainer, cfg.exp_manager)
 
     model = MegatronGPTModel(cfg.model, trainer)
-
+    print(model)
     trainer.fit(model)
 
 

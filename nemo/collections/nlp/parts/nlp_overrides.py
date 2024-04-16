@@ -420,6 +420,18 @@ class NLPDDPStrategy(DDPStrategy):
             and self.lightning_module.sharded_state_dict() is not None
         ):
 
+
+        # Try to read the checkpoint at `path`. If not exist, do not restore checkpoint.
+            checkpoint_path = inject_model_parallel_rank(checkpoint_path)
+            if not fs.exists(checkpoint_path):
+                raise FileNotFoundError(f"Checkpoint at {checkpoint_path} not found. Aborting training.")
+            torch.cuda.empty_cache()
+            return self.checkpoint_io.load_checkpoint(checkpoint_path)
+        
+    
+
+        # Legacy model parallel checkpointing logic, does not use megatron core
+        else:
             # Distributed checkpoints must be directories.
             if not fs.isdir(checkpoint_path):
                 raise ValueError(f'Distributed checkpoints should be a directory. Found: {checkpoint_path}.')
@@ -437,15 +449,6 @@ class NLPDDPStrategy(DDPStrategy):
             checkpoint = self._fix_tensors_device(checkpoint)
 
             return checkpoint
-
-        # Legacy model parallel checkpointing logic, does not use megatron core
-        else:
-            # Try to read the checkpoint at `path`. If not exist, do not restore checkpoint.
-            checkpoint_path = inject_model_parallel_rank(checkpoint_path)
-            if not fs.exists(checkpoint_path):
-                raise FileNotFoundError(f"Checkpoint at {checkpoint_path} not found. Aborting training.")
-            torch.cuda.empty_cache()
-            return self.checkpoint_io.load_checkpoint(checkpoint_path)
 
     def remove_checkpoint(self, filepath: Union[str, Path]) -> None:
         # check if filepath is a distributed checkpoint
