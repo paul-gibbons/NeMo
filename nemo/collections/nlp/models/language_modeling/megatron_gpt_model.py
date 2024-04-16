@@ -312,7 +312,6 @@ class MegatronGPTModel(MegatronBaseModel, TextGeneration):
                 share_embeddings_and_output_weights=self.cfg.get('share_embeddings_and_output_weights', True),
                 position_embedding_type=self.cfg.get('position_embedding_type', 'learned_absolute'),
                 rotary_percent=self.cfg.get('rotary_percentage', 1.0),
-                seq_len_interpolation_factor=self.cfg.get('seq_len_interpolation_factor', None),
             )
         else:
             assert self.cfg.get('num_query_groups', None) is None or self.cfg.get(
@@ -1333,7 +1332,7 @@ class MegatronGPTModel(MegatronBaseModel, TextGeneration):
         self.state_dict().
         The sharded tensor mapping is defined in the GPTModel class from mcore.
         """
-
+        """
         if self.mcore_gpt:
             module_prefix = f'{prefix}model.'
             sharded_state_dict = {}
@@ -1352,6 +1351,7 @@ class MegatronGPTModel(MegatronBaseModel, TextGeneration):
                 parallel_state.set_virtual_pipeline_model_parallel_rank(0)
 
             return sharded_state_dict
+        """
 
     def parameters(self):
         if isinstance(self.model, list):
