@@ -22,7 +22,7 @@ trainer:
 
 exp_manager:
   explicit_log_dir: null
-  exp_dir: /storage/nile_testing
+  exp_dir: /storage/testing
   name: nemo_v1.19.0_mcore_0.2_reproducer
   create_wandb_logger: False
   wandb_logger_kwargs:
