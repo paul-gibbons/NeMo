@@ -468,7 +468,7 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
                 self.trainer.strategy.setup_environment()
 
             encoder_seq_length = self.cfg.get('encoder_seq_length', 512)
-            logging.info(f"Encoder sequence length: {encoder_seq_length}")
+            logging.debug(f"Encoder sequence length: {encoder_seq_length}")
             model = MCoreNevaModel(
                 mm_cfg=self.cfg.mm_cfg,
                 media_start_id=media_start_id,
