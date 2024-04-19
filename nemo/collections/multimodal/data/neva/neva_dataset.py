@@ -148,12 +148,15 @@ class TarOrFolderVideoLoader:
     def flatten_frames(self, cap):
         if self.data_cfg['splice_single_frame'] == 'first':
             frame = cap[0].asnumpy()[:, :, ::-1]
+            logging.info(f"Extracting first frame from video")
             return Image.fromarray(frame).convert('RGB')
         elif self.data_cfg['splice_single_frame'] == 'middle':
             frame = cap[len(cap) // 2].asnumpy()[:, :, ::-1]
+            logging.info(f"Extracting middle frame from video")
             return Image.fromarray(frame).convert('RGB')
         elif self.data_cfg['splice_single_frame'] == 'last':
             frame = cap[-1].asnumpy()[:, :, ::-1]
+            logging.info(f"Extracting last frame from video")
             return Image.fromarray(frame).convert('RGB')
         else:
             if self.data_cfg['num_frames'] == -1:
@@ -162,6 +165,7 @@ class TarOrFolderVideoLoader:
                     rgb_frame = frame.asnumpy()[:, :, ::-1]
                     img = Image.fromarray(rgb_frame).convert('RGB')
                     frames.append(img)
+                logging.info(f"Extracting all {len(frames)} frames from video")
                 return frames
             else:
                 partition_size = max(1, len(cap) // self.data_cfg['num_frames'])
@@ -170,6 +174,7 @@ class TarOrFolderVideoLoader:
                     rgb_frame = cap[i].asnumpy()[:, :, ::-1]
                     img = Image.fromarray(rgb_frame).convert('RGB')
                     frames.append(img)
+                logging.info(f"Extracting {len(frames)} frames from video based on num_frames={self.data_cfg['num_frames']}")
                 return frames
 
 
@@ -205,12 +210,14 @@ def tokenize(
     tokens = tokenizer.text_to_ids(texts)
     max_len = max([len(token) for token in tokens])
     context_length = min(max_len - add_extra_token, context_length)
+    logging.info(f"Adjusted context length: {context_length}")
     # truncate and padding
     result = torch.zeros(len(tokens), context_length + add_extra_token, dtype=torch.long)
 
     for i, token in enumerate(tokens):
         if len(token) > context_length + add_extra_token:
             token = token[: context_length + add_extra_token]  # Truncate
+            logging.info(f"Truncated token length for text {i}: {len(token)}")
         result[i, : len(token)] = torch.tensor(token)
     if texts_is_str:
         result = result[0]
@@ -697,6 +704,7 @@ class LazySupervisedDataset(Dataset):
                 frames = self.video_loader.open_video(video_file)
                 if frames is None:
                     logging.warning(f"Video {video_file} could not be found!")
+                logging.info(f"Loaded video {video_file} with {len(frames)} frames")
                 if isinstance(self.processor, CLIPImageProcessor):
                     # image processor from HF
                     if self.multimodal_cfg['image_aspect_ratio'] == 'keep':
@@ -738,6 +746,8 @@ class LazySupervisedDataset(Dataset):
                 cur_token_len = (media_tensors[0].shape[1] // 14) * (
                     media_tensors[0].shape[2] // 14
                 )  # FIXME: 14 is hardcoded patch size
+                logging.info(f"Video tensor shape: {media_tensors.shape}")
+                logging.info(f"Current token length: {cur_token_len}")
                 sources = preprocess_multimodal(
                     copy.deepcopy(sources),
                     self.multimodal_cfg,
