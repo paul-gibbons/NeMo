@@ -3,9 +3,11 @@ from dataclasses import dataclass
 from typing import Any, List, Dict, Optional, Tuple, Union
 import torch
 from megatron.energon import DefaultTaskEncoder, batch_list, batch_stack
+from megatron.energon import batch_pad_stack
 from megatron.energon import Batch, CaptioningSample, DefaultTaskEncoder, OCRSample, VQASample, SimilarityInterleavedSample, InterleavedSample
 from transformers import CLIPImageProcessor, SiglipImageProcessor
 import re
+import numpy as np
 from nemo.collections.common.tokenizers import SentencePieceTokenizer
 from neva_dataset import (
     process_image,
@@ -20,15 +22,21 @@ from neva_dataset import (
 )
 
 @dataclass
-class NevaSample:
+class ImageTaskSample:
     __key__: str
     __subflavor__: str
     conversations: List[dict]
-    image: Optional[Union[str, List[str]]] = None
+    image: Optional[Union[str, List[str], torch.Tensor]] = None
     video: Optional[Union[str, List[str]]] = None
 
+    tokens: Optional[torch.Tensor] = None
+    labels: Optional[torch.Tensor] = None
+    attention_mask: Optional[torch.Tensor] = None
+    loss_mask: Optional[torch.Tensor] = None
+    position_ids: Optional[torch.Tensor] = None
+
 @dataclass
-class NevaBatch(Batch):
+class ImageTaskBatch(Batch):
     __keys__: List[str]
     tokens: torch.Tensor
     labels: torch.Tensor
@@ -40,28 +48,103 @@ class NevaBatch(Batch):
 
 
 
-class NevaTaskEncoder(DefaultTaskEncoder[Union[NevaSample, VQASample, InterleavedSample], Union[NevaSample, VQASample], NevaBatch, NevaBatch]):
+class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatch, dict]):
     def __init__(self, tokenizer, image_processor, multimodal_cfg: dict, data_cfg: dict):
-        super().__init__(batch_type=NevaBatch)
+        super().__init__(batch_type=ImageTaskBatch)
         self.tokenizer = tokenizer
         self.image_processor = image_processor
         self.multimodal_cfg = multimodal_cfg
         self.data_cfg = data_cfg
         self.conv_template = multimodal_cfg["conv_template"]
 
-    def encode_sample(self, sample: Union[NevaSample, VQASample, InterleavedSample]) -> NevaSample:
+    def encode_sample(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample, SimilarityInterleavedSample]) -> dict:
         if isinstance(sample, InterleavedSample):
             return self.encode_interleaved(sample)
+        elif isinstance(sample, VQASample):
+            return self.encode_pretrain(sample)
+        elif isinstance(sample, SimilarityInterleavedSample):
+            return self.encode_sft(sample)
+        else:
+            return self.encode_sft(sample)
+
+    def encode_pretrain(self, sample: VQASample) -> dict:
+        conversations = [
+            {"from": "human", "value": sample.context},
+            {"from": "gpt", "value": sample.answers}
+        ]
+        processed_sample = {"conversations": conversations}
         
         if self.multimodal_cfg['is_multimodal']:
             if hasattr(sample, 'image') and sample.image is not None:
-                sample.image = self.process_images(sample.image)
+                processed_sample["image"] = self.process_images(sample.image)
+                cur_token_len = self.calculate_token_length(processed_sample["image"])
+                processed_sample = preprocess_multimodal(
+                    [processed_sample],
+                    self.multimodal_cfg,
+                    cur_token_len,
+                    use_plain=(self.conv_template == "plain")
+                )[0]
+        
+        processed = self.preprocess_conversations([processed_sample])
+        tokens = processed["tokens"]
+        labels = processed["labels"]
+        attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __subflavor__=sample.__subflavor__,
+            conversations=conversations,
+            image=processed_sample.get("image"),
+            video=processed_sample.get("video"),
+            tokens=tokens,
+            labels=labels,
+            attention_mask=attention_mask,
+            loss_mask=loss_mask,
+            position_ids=position_ids
+        )
+
+    def encode_sft(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample]) -> dict:
+        conversations = sample.texts if hasattr(sample, 'texts') else sample.conversations
+        processed_sample = {"conversations": conversations}
+        
+        if self.multimodal_cfg['is_multimodal']:
+            image_present = False
+            if hasattr(sample, 'image') and sample.image is not None:
+                processed_sample["image"] = self.process_images(sample.image)
+                image_present = True
+            elif hasattr(sample, 'images') and sample.images:
+                processed_sample["image"] = self.process_images(sample.images[0])
+                image_present = True
             elif hasattr(sample, 'video') and sample.video:
                 # Implement video processing if needed
                 pass
-        return sample
+            
+            if image_present:
+                processed_sample = preprocess_multimodal(
+                    [processed_sample],
+                    self.multimodal_cfg,
+                    self.calculate_token_length(processed_sample["image"]),
+                    use_plain=(self.conv_template == "plain")
+                )[0]
+        
+        processed = self.preprocess_conversations([processed_sample])
+        tokens = processed["tokens"]
+        labels = processed["labels"]
+        attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __subflavor__=sample.__subflavor__,
+            conversations=conversations,
+            image=processed_sample.get("image", torch.tensor([])),
+            tokens=tokens,
+            labels=labels,
+            attention_mask=attention_mask,
+            loss_mask=loss_mask,
+            position_ids=position_ids
+        )
 
-    def encode_interleaved(self, sample: InterleavedSample) -> NevaSample:
+    def encode_interleaved(self, sample: InterleavedSample) -> dict:
         interleaved_text = []
         images = []
         for item in sample.sequence:
@@ -69,23 +152,47 @@ class NevaTaskEncoder(DefaultTaskEncoder[Union[NevaSample, VQASample, Interleave
                 interleaved_text.append(item)
             elif isinstance(item, torch.Tensor) or isinstance(item, str):
                 interleaved_text.append(DEFAULT_IMAGE_TOKEN)
-        
                 images.append(item)
             else:
                 raise ValueError(f"Unsupported type in interleaved sequence: {type(item)}")
-        processed_images = self.process_images(images)
         
+        processed_images = self.process_images(images)
         combined_text = ' '.join(interleaved_text)
-
-
-        return NevaSample(
+        
+        processed_sample = {
+            "conversations": [
+                {"from": "human", "value": combined_text},
+                {"from": "gpt", "value": ""}
+            ],
+            "image": processed_images if isinstance(processed_images, torch.Tensor) else torch.stack(processed_images) if images else None
+        }
+        if self.multimodal_cfg['is_multimodal']:
+            if images:
+                processed_sample["image"] = self.process_images(images)
+                cur_token_len = self.calculate_token_length(processed_sample["image"])
+                processed_sample = preprocess_multimodal(
+                    [processed_sample],
+                    self.multimodal_cfg,
+                    cur_token_len,
+                    use_plain=(self.conv_template == "plain")
+                )[0]
+        
+        processed = self.preprocess_conversations([processed_sample])
+        
+        tokens = processed["tokens"]
+        labels = processed["labels"]
+        attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        return ImageTaskSample(
             __key__=sample.__key__,
-            __subflavor__=sample.__subflavors__.get("interleaved", ""),
-            conversations=[
-            {"from": "human", "value": combined_text},
-            {"from": "gpt", "value": ""}  # Empty response placeholder
-        ],
-            image=torch.stack(processed_images) if images else None
+            __subflavor__=sample.__subflavor__,
+            conversations=processed_sample["conversations"],
+            image=processed_sample["image"],
+            tokens=tokens,
+            labels=labels,
+            attention_mask=attention_mask,
+            loss_mask=loss_mask,
+            position_ids=position_ids
         )
 
     def process_images(self, images):
@@ -95,58 +202,21 @@ class NevaTaskEncoder(DefaultTaskEncoder[Union[NevaSample, VQASample, Interleave
         for image in images:
             image = process_image(self.image_processor, image, self.multimodal_cfg['image_aspect_ratio'])
             processed_images.append(image)
-        return processed_images
+        return torch.stack(processed_images) if len(processed_images) > 1 else processed_images[0]
 
-    def batch(self, samples: List[Union[NevaSample, VQASample, InterleavedSample]]) -> NevaBatch:
-        sources = []
-        for s in samples:
-            if isinstance(s, VQASample):
-                conversations = [
-                    {"from": "human", "value": s.context},
-                    {"from": "gpt", "value": s.answers}
-                ]
-            else:
-                conversations = s.conversations
-            sources.append({"conversations": conversations})
-
-        if self.multimodal_cfg['is_multimodal']:
-            cur_token_len = self.calculate_token_length(samples[0].image[0])
-            sources = preprocess_multimodal(
-                sources,
-                self.multimodal_cfg,
-                cur_token_len,
-                use_plain=(self.conv_template == "plain")
-            )
-
-        data_dict = self.preprocess_conversations(sources)
-
-        tokens = data_dict["tokens"]
-        labels = data_dict["labels"]
-        attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
-
-        media = None
-        if self.multimodal_cfg['is_multimodal']:
-            media_list = []
-            for s in samples:
-                if hasattr(s, 'image') and s.image is not None:
-                    if isinstance(s.image, list):
-                        # Multiple images case
-                        media_list.extend(s.image)
-                    else:
-                        # Single image case
-                        media_list.append(s.image)
-            if media_list:
-                media = torch.stack(media_list)
-
-        return NevaBatch(
+    def batch(self, samples: List[ImageTaskSample]) -> ImageTaskBatch:
+        batch = ImageTaskBatch(
             __keys__=[s.__key__ for s in samples],
-            tokens=tokens,
-            labels=labels,
-            attention_mask=attention_mask,
-            loss_mask=loss_mask,
-            position_ids=position_ids,
-            media=media
+            tokens=batch_pad_stack([s.tokens for s in samples]),
+            labels=batch_pad_stack([s.labels for s in samples]),
+            attention_mask=batch_pad_stack([s.attention_mask for s in samples]),
+            loss_mask=batch_pad_stack([s.loss_mask for s in samples]),
+            position_ids=batch_pad_stack([s.position_ids for s in samples]),
+            media=torch.stack([s.image for s in samples if s.image is not None]) if self.multimodal_cfg['is_multimodal'] else None,
+            cu_seqlens=None
         )
+        return batch
+
 
     def preprocess_conversations(self, sources):
         if self.conv_template == "nvgpt":
@@ -168,7 +238,7 @@ class NevaTaskEncoder(DefaultTaskEncoder[Union[NevaSample, VQASample, Interleave
 
 
 
-    def encode_batch(self, batch: NevaBatch) -> dict:
+    def encode_batch(self, batch: ImageTaskBatch) -> dict:
         raw = dataclasses.asdict(batch)
         return raw
 
@@ -198,7 +268,7 @@ class NevaTaskEncoder(DefaultTaskEncoder[Union[NevaSample, VQASample, Interleave
         return attention_mask, loss_mask, position_ids
 
 # Usage example:
-# neva_encoder = NevaTaskEncoder(
+# neva_encoder = TaskEncoder(
 #     tokenizer=your_tokenizer,
 #     image_processor=your_image_processor,
 #     multimodal_cfg=your_multimodal_cfg,
