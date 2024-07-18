@@ -153,7 +153,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             if isinstance(item, str):
                 interleaved_text.append(item)
             elif isinstance(item, torch.Tensor) or isinstance(item, str):
-                interleaved_text.append(DEFAULT_IMAGE_TOKEN) #<image>
+                interleaved_text.append(DEFAULT_IMAGE_TOKEN)
                 images.append(item)
             else:
                 raise ValueError(f"Unsupported type in interleaved sequence: {type(item)}")
@@ -168,6 +168,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         else:
             processed_images = None
         
+        processed_images = self.process_images(images)
         combined_text = ' '.join(interleaved_text)
         
         
@@ -204,6 +205,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
                     use_plain=(self.conv_template == "plain")
                 )[0]
                 
+        
         processed = self.preprocess_conversations([processed_sample])
         
         tokens = processed["tokens"]
@@ -271,6 +273,8 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             return preprocess_interleaved_prompt(sources, self.tokenizer, self.multimodal_cfg)
         else:
             raise ValueError(f"Conversation template `{self.conv_template}` is not supported in Neva now.")
+
+
 
     def encode_batch(self, batch: ImageTaskBatch) -> dict:
         raw = dataclasses.asdict(batch)
