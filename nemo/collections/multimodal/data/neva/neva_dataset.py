@@ -36,6 +36,7 @@ from nemo.collections.multimodal.data.clip.augmentations.augmentations import im
 from nemo.collections.multimodal.data.neva.conversation import (
     DEFAULT_BOS_TOKEN,
     DEFAULT_EOS_TOKEN,
+    DEFAULT_PAD_TOKEN,
     DEFAULT_IM_END_TOKEN,
     DEFAULT_IM_START_TOKEN,
     DEFAULT_IMAGE_PATCH_TOKEN,
@@ -246,7 +247,6 @@ def get_tokens_ids(tokenizer, tokens):
     """
     return [tokenizer.token_to_id(token) for token in tokens]
 
-
 def preprocess_multimodal(sources: dict, multimodal_cfg: dict, cur_token_len: int, use_plain: bool = False) -> Dict:
     """
     Preprocesses multimodal sources based on the provided configuration.
@@ -295,6 +295,7 @@ def preprocess_multimodal(sources: dict, multimodal_cfg: dict, cur_token_len: in
     else:
         replace_token = DEFAULT_IMAGE_PATCH_TOKEN[model_type] * (num_patches - 2)
     replace_token = DEFAULT_IM_START_TOKEN[model_type] + replace_token + DEFAULT_IM_END_TOKEN[model_type]
+    # these are the default tokens for image and video
 
     if media_type == 'video' and multimodal_cfg.get("use_lita", False):
         if not multimodal_cfg.get('lita', None):
@@ -333,7 +334,7 @@ def preprocess_multimodal(sources: dict, multimodal_cfg: dict, cur_token_len: in
             else:
                 replace_token = image_patch * (num_tokens - 2)
             replace_token = media_start + replace_token + media_end
-
+        
     for source in sources:
         conversation = source['conversations']
         if multimodal_cfg['sep_image_conv_front']:
@@ -349,8 +350,16 @@ def preprocess_multimodal(sources: dict, multimodal_cfg: dict, cur_token_len: in
         if use_plain:
             assert default_token in conversation[0]['value']
             conversation[0]['value'] = default_token
-        for turn in conversation:
-            turn["value"] = turn["value"].replace(default_token, replace_token)
+        
+        if multimodal_cfg["conv_template"] == "interleaved":
+            # directly replace the default_token in the conversation,
+            # since we don't use the conversation template
+            
+            updated_conversation = conversation.replace(default_token, replace_token)
+            source['conversations'] = updated_conversation
+        else:
+            for turn in conversation:
+                turn["value"] = turn["value"].replace(default_token, replace_token)
     return sources
 
 
@@ -577,10 +586,6 @@ def preprocess_llama_2(
             cur_len += round_len
         target[cur_len:] = IGNORE_INDEX
 
-    # Check if masking working correctly
-    # masking_test =[x for x in zip(tokens[0].numpy().tolist(), labels[0].numpy().tolist())]
-    # print(masking_test)
-
     if add_extra_token:
         tokens = tokens[:, :-1].contiguous()
         labels = labels[:, 1:].contiguous()
@@ -592,7 +597,48 @@ def preprocess_llama_2(
         tokens=tokens,
         labels=labels,
     )
+    
+def preprocess_interleaved_prompt(
+    sources: dict,
+    tokenizer,
+    cfg,
+) -> Dict:
+    
+    """tokenize the interleaved prompt and mask the text part of the prompt
+    """
+    conversations = []
+    for source in sources:
+        conversations.append(source['conversations'])
+    add_extra_token = cfg.get("add_extra_token")
+    tokens = tokenize(
+        texts=conversations,
+        tokenizer=tokenizer,
+        context_length=cfg.get("context_length"),
+        add_extra_token=add_extra_token,
+    )
 
+    labels = tokens.clone().detach()
+    
+    model_type = cfg['model_type']
+    image_patch_token = DEFAULT_IMAGE_PATCH_TOKEN[model_type]
+    image_start_token = DEFAULT_IM_START_TOKEN[model_type]
+    image_end_token = DEFAULT_IM_END_TOKEN[model_type]
+    DEFAULT_TOKENS = [image_patch_token, image_start_token, image_end_token, DEFAULT_PAD_TOKEN]
+    img_patch_id, img_start_id, img_end_id, pad_id = get_tokens_ids(tokenizer, DEFAULT_TOKENS)
+    tokens[tokens == img_patch_id] = 0  # DEFAULT_IMAGE_PATCH_TOKEN
+
+    labels = tokens.clone().detach()
+
+    # Mask labels change for interleaved prompt
+    labels[labels == img_start_id] = IGNORE_INDEX
+    labels[labels == img_end_id] = IGNORE_INDEX
+    labels[labels == 0] = IGNORE_INDEX
+    labels[labels == pad_id] = IGNORE_INDEX
+    
+    return dict(
+        tokens=tokens,
+        labels=labels,
+    )
 
 def preprocess_v1(
     sources: dict,
@@ -898,7 +944,7 @@ def preprocess_nv_dpo(
 
             cur_len += round_len
         target[cur_len:] = IGNORE_INDEX
-
+        
     # Check if masking working correctly
     # print([x for x in zip(tokens[0].numpy().tolist(), labels[0].numpy().tolist())])
 
