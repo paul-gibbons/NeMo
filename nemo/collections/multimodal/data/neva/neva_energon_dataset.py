@@ -63,13 +63,14 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         if isinstance(sample, InterleavedSample):
             return self.encode_interleaved(sample)
         elif isinstance(sample, VQASample):
-            return self.encode_pretrain(sample)
+            return self.encode_vqa(sample)
         elif isinstance(sample, SimilarityInterleavedSample):
+            #return self.encode_similarity_interleaved(sample)
             return self.encode_sft(sample)
         else:
             return self.encode_sft(sample)
 
-    def encode_pretrain(self, sample: VQASample) -> dict:
+    def encode_vqa(self, sample: VQASample) -> dict:
         conversations = [
             {"from": "human", "value": sample.context},
             {"from": "gpt", "value": sample.answers}
@@ -103,9 +104,10 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             attention_mask=attention_mask,
             loss_mask=loss_mask,
             position_ids=position_ids
+            
         )
 
-    def encode_sft(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample]) -> dict:
+    def encode_sft(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample, SimilarityInterleavedSample]) -> dict:
         conversations = sample.texts if hasattr(sample, 'texts') else sample.conversations
         processed_sample = {"conversations": conversations}
         
@@ -145,7 +147,86 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             loss_mask=loss_mask,
             position_ids=position_ids
         )
-
+    
+    
+    def encode_similarity_interleaved(self, sample: SimilarityInterleavedSample) -> dict:
+        
+        # 4 fields: sample.images, sample.texts, sample.similarity_matrix, sample.matched_text_index
+        images, sentence_ixs = [], []
+        for sample_image, sim_vec in zip(sample.images, sample.matched_text_index):
+            images.append(sample_image)
+            sentence_ixs.append(sim_vec)
+            
+        # constrain max num images
+        max_num_images = self.max_num_images
+        if len(images) > max_num_images:
+            images = images[:max_num_images]
+            sentence_ixs = sentence_ixs[:max_num_images]
+        
+        images = [images[i] for i in np.argsort(sentence_ixs)]
+        
+        for ix in sentence_ixs:
+            sample.texts[ix] = f"{DEFAULT_IMAGE_TOKEN} {sample.texts[ix]}"
+        
+        if self.image_following_text_only:
+            # use pad token to divide sentence pieces
+            text = self.tokenizer.pad_id.join(sample.texts)
+        else:
+            text = " ".join(sample.texts)
+        
+        text = text.replace("<image> ", "<image>").replace(" <image>", "<image>")
+        text = f"{text}{self.tokenizer.eos_id}"
+        
+        if len(images) > 0:
+            processed_images = self.process_images(images)
+        else:
+            processed_images = None
+        
+        # check the case where the last token is the image token, do we ALSO need this for strictly interleaved?
+        if combined_text.endswith(DEFAULT_IMAGE_TOKEN):
+            combined_text = combined_text[:-len(DEFAULT_IMAGE_TOKEN)]
+        
+        n_im_patch = combined_text.count(DEFAULT_IMAGE_TOKEN)
+        processed_images = processed_images[:n_im_patch]
+        assert len(processed_images) == n_im_patch
+        
+        # #pad empty tensors to max_num_images
+        # if images is not None:
+        #     processed_sample["image"] = self.pad_images(processed_images, self.max_num_images)
+        
+        processed_sample = {
+            "conversations": text,
+            "image": processed_images
+        }
+        
+        if self.multimodal_cfg['is_multimodal']:
+            if images:
+                cur_token_len = self.calculate_token_length(processed_sample["image"])
+                processed_sample = preprocess_multimodal(
+                    [processed_sample],
+                    self.multimodal_cfg,
+                    cur_token_len,
+                    use_plain=(self.conv_template == "plain")
+                )[0]
+                
+        processed = self.preprocess_conversations([processed_sample])
+        
+        tokens = processed["tokens"]
+        labels = processed["labels"]
+        attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __subflavor__=sample.__subflavor__,
+            conversations=processed_sample["conversations"],
+            image=processed_sample["image"],
+            tokens=tokens,
+            labels=labels,
+            attention_mask=attention_mask,
+            loss_mask=loss_mask,
+            position_ids=position_ids
+        )
+    
     def encode_interleaved(self, sample: InterleavedSample) -> dict:
         interleaved_text = []
         images = []
@@ -168,27 +249,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         else:
             processed_images = None
         
-        processed_images = self.process_images(images)
         combined_text = ' '.join(interleaved_text)
-        
-        
-        # TODO: check the case where the last token is the image token, do we ALSO need this for strictly interleaved?
-        # if input_ids[-1] == 0:
-        #     last_non_img_patch_idx = torch.where(input_ids == 0)[0][-1] + 1
-        #     input_ids = input_ids[:last_non_img_patch_idx]
-        
-        # if combined_text.endswith(DEFAULT_IMAGE_TOKEN):
-        #     combined_text = combined_text[:-len(DEFAULT_IMAGE_TOKEN)]
-        
-        # #n_im_patch = (input_ids == 0).sum().item()
-        # n_im_patch = combined_text.count(DEFAULT_IMAGE_TOKEN)
-        # processed_images = processed_images[:n_im_patch]
-        # assert len(processed_images) == n_im_patch
-        
-        # pad empty tensors to max_num_images
-        # if images is not None:
-        #     processed_sample["image"] = self.pad_images(processed_images, self.max_num_images)
-        
         
         processed_sample = {
             "conversations": combined_text,
@@ -231,7 +292,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         for image in images:
             image = process_image(self.image_processor, image, self.multimodal_cfg['image_aspect_ratio'])
             processed_images.append(image)
-        return torch.stack(processed_images) if len(processed_images) > 1 else processed_images[0]
+        return torch.stack(processed_images) #make it always 4D, otherwise has problem when len(images) > 1
 
     def pad_images(self, images, max_num_images):
         if len(images) < max_num_images:
@@ -281,9 +342,14 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         return raw
 
     def calculate_token_length(self, media_tensor):
+        if len(media_tensor.shape) == 4:
+            height = media_tensor.shape[2]
+            width = media_tensor.shape[3]
+        else:
+            raise ValueError("Media tensor must be 4-dimensional")
         patch_dim = self.multimodal_cfg['patch_dim']
-        height_num_patches = media_tensor.shape[1] // patch_dim
-        width_num_patches = media_tensor.shape[2] // patch_dim
+        height_num_patches = height // patch_dim
+        width_num_patches = width // patch_dim
         if self.multimodal_cfg['mm_mlp_adapter_type'] == 'mlp_downsample':
             height_num_patches = (height_num_patches + 1) // 2 * 2
             width_num_patches = (width_num_patches + 1) // 2 * 2
