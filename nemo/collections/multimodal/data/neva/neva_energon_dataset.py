@@ -64,14 +64,14 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         if isinstance(sample, InterleavedSample):
             return self.encode_interleaved(sample)
         elif isinstance(sample, VQASample):
-            return self.encode_vqa(sample)
+            return self.encode_pretrain(sample)
         elif isinstance(sample, SimilarityInterleavedSample):
             #return self.encode_similarity_interleaved(sample)
             return self.encode_sft(sample)
         else:
             return self.encode_sft(sample)
 
-    def encode_vqa(self, sample: VQASample) -> dict:
+    def encode_pretrain(self, sample: VQASample) -> dict:
         conversations = [
             {"from": "human", "value": sample.context},
             {"from": "gpt", "value": sample.answers}
@@ -112,9 +112,6 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         conversations = sample.texts if hasattr(sample, 'texts') else sample.conversations
         processed_sample = {"conversations": conversations}
         
-        #print("sample.texts:", sample.texts)
-        print(f'sample is {sample}')
-        
         if self.multimodal_cfg['is_multimodal']:
             image_present = False
             if hasattr(sample, 'image') and sample.image is not None:
@@ -139,6 +136,10 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         tokens = processed["tokens"]
         labels = processed["labels"]
         attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        #add 1 dummy pad image when no image is present
+        if not image_present:
+            processed_sample["image"] = torch.zeros(1, 3, self.multimodal_cfg["crop_size"][0], self.multimodal_cfg["crop_size"][1])
         
         return ImageTaskSample(
             __key__=sample.__key__,
@@ -166,10 +167,6 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         if len(images) > max_num_images:
             images = images[:max_num_images]
             sentence_ixs = sentence_ixs[:max_num_images]
-        elif len(images) < max_num_images:
-            #pad images to have same number of images
-            images.extend([torch.zeros(3, self.multimodal_cfg['crop_size'][0], self.multimodal_cfg['crop_size'][1]) for _ in range(max_num_images - len(images))])
-            sentence_ixs.extend([0 for _ in range(max_num_images - len(sentence_ixs))])
         
         images = [images[i] for i in np.argsort(sentence_ixs)]
         
@@ -198,10 +195,6 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         processed_images = processed_images[:n_im_patch]
         assert len(processed_images) == n_im_patch
         
-        # #pad empty tensors to max_num_images
-        # if images is not None:
-        #     processed_sample["image"] = self.pad_images(processed_images, self.max_num_images)
-        
         processed_sample = {
             "conversations": text,
             "image": processed_images
@@ -222,6 +215,10 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         tokens = processed["tokens"]
         labels = processed["labels"]
         attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        #pad images
+        if images:
+            processed_sample["image"] = self.pad_images(processed_sample["image"], self.max_num_images)
         
         return ImageTaskSample(
             __key__=sample.__key__,
@@ -251,10 +248,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         max_num_images = self.max_num_images
         if len(images) > max_num_images:
             images = images[:max_num_images]
-        elif len(images) < max_num_images:
-            #pad images to have same number of images
-            images.extend([torch.zeros(3, self.multimodal_cfg['crop_size'][0], self.multimodal_cfg['crop_size'][1]) for _ in range(max_num_images - len(images))])
-        
+
         if len(images) > 0:
             processed_images = self.process_images(images)
         else:
@@ -283,6 +277,10 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         tokens = processed["tokens"]
         labels = processed["labels"]
         attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        #pad images
+        if images:
+            processed_sample["image"] = self.pad_images(processed_sample["image"], self.max_num_images)
         
         return ImageTaskSample(
             __key__=sample.__key__,
@@ -313,18 +311,6 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         return images
 
     def batch(self, samples: List[ImageTaskSample]) -> ImageTaskBatch:
-        
-        dummy_image = torch.zeros((3, self.multimodal_cfg['crop_size'][0], self.multimodal_cfg['crop_size'][1]))
-
-        images = []
-        for s in samples:
-            if s.image is None:
-                images.append(dummy_image)
-            else:
-                images.append(s.image)
-        media = torch.stack(images) if self.multimodal_cfg['is_multimodal'] else None
-    
-    
         batch = ImageTaskBatch(
             __keys__=[s.__key__ for s in samples],
             tokens=batch_pad_stack([s.tokens for s in samples]),
@@ -332,8 +318,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             attention_mask=batch_pad_stack([s.attention_mask for s in samples]),
             loss_mask=batch_pad_stack([s.loss_mask for s in samples]),
             position_ids=batch_pad_stack([s.position_ids for s in samples]),
-            #media=torch.stack([s.image for s in samples if s.image is not None]) if self.multimodal_cfg['is_multimodal'] else None,
-            media=media,
+            media=torch.stack([s.image for s in samples if s.image is not None]) if self.multimodal_cfg['is_multimodal'] else None,
             cu_seqlens=None
         )
         return batch
