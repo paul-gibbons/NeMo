@@ -58,6 +58,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         self.data_cfg = data_cfg
         self.conv_template = multimodal_cfg["conv_template"]
         self.max_num_images = 6
+        self.image_following_text_only = False
 
     def encode_sample(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample, SimilarityInterleavedSample]) -> dict:
         if isinstance(sample, InterleavedSample):
@@ -107,9 +108,12 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             
         )
 
-    def encode_sft(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample, SimilarityInterleavedSample]) -> dict:
+    def encode_sft(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample]) -> dict:
         conversations = sample.texts if hasattr(sample, 'texts') else sample.conversations
         processed_sample = {"conversations": conversations}
+        
+        #print("sample.texts:", sample.texts)
+        print(f'sample is {sample}')
         
         if self.multimodal_cfg['is_multimodal']:
             image_present = False
@@ -162,6 +166,10 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         if len(images) > max_num_images:
             images = images[:max_num_images]
             sentence_ixs = sentence_ixs[:max_num_images]
+        elif len(images) < max_num_images:
+            #pad images to have same number of images
+            images.extend([torch.zeros(3, self.multimodal_cfg['crop_size'][0], self.multimodal_cfg['crop_size'][1]) for _ in range(max_num_images - len(images))])
+            sentence_ixs.extend([0 for _ in range(max_num_images - len(sentence_ixs))])
         
         images = [images[i] for i in np.argsort(sentence_ixs)]
         
@@ -183,10 +191,10 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             processed_images = None
         
         # check the case where the last token is the image token, do we ALSO need this for strictly interleaved?
-        if combined_text.endswith(DEFAULT_IMAGE_TOKEN):
-            combined_text = combined_text[:-len(DEFAULT_IMAGE_TOKEN)]
+        if text.endswith(DEFAULT_IMAGE_TOKEN):
+            text = text[:-len(DEFAULT_IMAGE_TOKEN)]
         
-        n_im_patch = combined_text.count(DEFAULT_IMAGE_TOKEN)
+        n_im_patch = text.count(DEFAULT_IMAGE_TOKEN)
         processed_images = processed_images[:n_im_patch]
         assert len(processed_images) == n_im_patch
         
@@ -243,6 +251,9 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         max_num_images = self.max_num_images
         if len(images) > max_num_images:
             images = images[:max_num_images]
+        elif len(images) < max_num_images:
+            #pad images to have same number of images
+            images.extend([torch.zeros(3, self.multimodal_cfg['crop_size'][0], self.multimodal_cfg['crop_size'][1]) for _ in range(max_num_images - len(images))])
         
         if len(images) > 0:
             processed_images = self.process_images(images)
@@ -302,6 +313,18 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         return images
 
     def batch(self, samples: List[ImageTaskSample]) -> ImageTaskBatch:
+        
+        dummy_image = torch.zeros((3, self.multimodal_cfg['crop_size'][0], self.multimodal_cfg['crop_size'][1]))
+
+        images = []
+        for s in samples:
+            if s.image is None:
+                images.append(dummy_image)
+            else:
+                images.append(s.image)
+        media = torch.stack(images) if self.multimodal_cfg['is_multimodal'] else None
+    
+    
         batch = ImageTaskBatch(
             __keys__=[s.__key__ for s in samples],
             tokens=batch_pad_stack([s.tokens for s in samples]),
@@ -309,7 +332,8 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             attention_mask=batch_pad_stack([s.attention_mask for s in samples]),
             loss_mask=batch_pad_stack([s.loss_mask for s in samples]),
             position_ids=batch_pad_stack([s.position_ids for s in samples]),
-            media=torch.stack([s.image for s in samples if s.image is not None]) if self.multimodal_cfg['is_multimodal'] else None,
+            #media=torch.stack([s.image for s in samples if s.image is not None]) if self.multimodal_cfg['is_multimodal'] else None,
+            media=media,
             cu_seqlens=None
         )
         return batch
