@@ -376,6 +376,12 @@ class NLPDDPStrategy(DDPStrategy):
             When using megatron core, the distributed checkpointing library expects save functions to be
             called on every rank and internally does the rank checking.
         """
+        #TODO ADD CHECK FOR ENERGON
+        
+        train_iterator = self.lightning_module.trainer.train_dataloader
+        iteration = checkpoint['global_step']
+        dataloader_save_path = os.path.dirname(filepath)
+        self.save_dataloader_state(train_iterator, iteration, dataloader_save_path)
         # check if using distributed checkpointing
         if self.use_distributed_checkpointing:
             assert (
@@ -403,6 +409,53 @@ class NLPDDPStrategy(DDPStrategy):
             filepath = inject_model_parallel_rank(filepath)
             if self.is_global_zero or app_state.data_parallel_rank == 0:
                 self.checkpoint_io.save_checkpoint(checkpoint, filepath, storage_options=storage_options)
+
+    def save_dataloader_state(self, train_iterator, iteration, dataloader_save_path):
+        """Saves dataloader state if the dataloader supports it.
+
+        Currently, this is only used by Megatron Energon dataloader (multimodal) to store its state at a
+        specific iteration. The Megatron built-in dataloader (text-only) creates index files upfront
+        to track its state.
+
+        If the provided dataloader has `save_state` method, then it is called to save the state.
+        Otherwise, no state is saved.
+
+        Args:
+            train_iterator (iterable): Train dataloader.
+            iteration (int): Current iteration.
+            dataloader_save_path (str): Path where the dataloader state is saved.
+        """
+        # If no dataloader or saving path is provided, then exit early.
+        if train_iterator is None or dataloader_save_path is None:
+            return
+
+        # If dataloader doesn't support saving state, exit early.
+        #if not hasattr(train_iterator, "save_state"):
+        #    return
+
+        # Save dataloader state for each data parallel rank only once.
+        first_rank = parallel_state.is_pipeline_first_stage(ignore_virtual=True) and parallel_state.get_tensor_model_parallel_rank() == 0
+        if not first_rank:
+            return
+
+        dp_rank = parallel_state.get_data_parallel_rank()
+        print(f"saving dataloader checkpoint at iteration {iteration} to {dataloader_save_path}")
+        train_dataloader_state_dict = train_iterator.save_state_rank()
+        #TODO set the save path as the same as what the model checkpoint is being saved to and name something like f'train_dataloader_dprank{dp_rank:03d}.pt'
+        data_state_save_path = f"{dataloader_save_path}/train_dataloader_dprank{dp_rank:03d}_step{iteration}.pt"
+        
+
+
+        torch.distributed.barrier(group=parallel_state.get_data_parallel_group())
+        # Create directory if it doesn't exist
+        if parallel_state.get_data_parallel_rank() == 0:
+            os.makedirs(os.path.dirname(data_state_save_path), exist_ok=True)
+
+        torch.distributed.barrier(group=parallel_state.get_data_parallel_group())
+
+        dataloader_save_dict = {}
+        dataloader_save_dict['dataloader_state_dict'] = train_dataloader_state_dict
+        torch.save(dataloader_save_dict, data_state_save_path)
 
     # PTL 2.2 supports non strict loading of the ckpt with the strict arg (https://github.com/Lightning-AI/pytorch-lightning/pull/19404)
     def load_model_state_dict(self, checkpoint: Mapping[str, Any], strict: bool = True) -> None:

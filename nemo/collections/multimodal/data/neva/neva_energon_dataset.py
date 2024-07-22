@@ -2,6 +2,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, List, Dict, Optional, Tuple, Union
 import torch
+from einops import rearrange
 from megatron.energon import DefaultTaskEncoder, batch_list, batch_stack
 from megatron.energon import batch_pad_stack
 from megatron.energon import Batch, CaptioningSample, DefaultTaskEncoder, OCRSample, VQASample, SimilarityInterleavedSample, InterleavedSample
@@ -9,7 +10,7 @@ from transformers import CLIPImageProcessor, SiglipImageProcessor
 import re
 import numpy as np
 from nemo.collections.common.tokenizers import SentencePieceTokenizer
-from neva_dataset import (
+from nemo.collections.multimodal.data.neva.neva_dataset import (
     process_image,
     preprocess_multimodal,
     preprocess_nvgpt,
@@ -38,14 +39,12 @@ class ImageTaskSample:
 
 @dataclass
 class ImageTaskBatch(Batch):
-    __keys__: List[str]
     tokens: torch.Tensor
     labels: torch.Tensor
     attention_mask: torch.Tensor
     loss_mask: torch.Tensor
     position_ids: torch.Tensor
     media: Optional[torch.Tensor] = None
-    cu_seqlens: Optional[torch.Tensor] = None
 
 
 
@@ -58,6 +57,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         self.data_cfg = data_cfg
         self.conv_template = multimodal_cfg["conv_template"]
         self.max_num_images = 6
+        self.image_following_text_only = False
 
     def encode_sample(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample, SimilarityInterleavedSample]) -> dict:
         if isinstance(sample, InterleavedSample):
@@ -65,6 +65,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         elif isinstance(sample, VQASample):
             return self.encode_pretrain(sample)
         elif isinstance(sample, SimilarityInterleavedSample):
+            #return self.encode_similarity_interleaved(sample)
             return self.encode_sft(sample)
         else:
             return self.encode_sft(sample)
@@ -98,10 +99,10 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             conversations=conversations,
             image=processed_sample.get("image"),
             video=processed_sample.get("video"),
-            tokens=tokens,
-            labels=labels,
-            attention_mask=attention_mask,
-            loss_mask=loss_mask,
+            tokens=tokens.squeeze(0),
+            labels=labels.squeeze(0),
+            attention_mask=attention_mask.squeeze(0),
+            loss_mask=loss_mask.squeeze(0),
             position_ids=position_ids
         )
 
@@ -134,15 +135,97 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         labels = processed["labels"]
         attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
         
+        if not image_present:
+            processed_sample["image"] = torch.zeros(1, 3, self.multimodal_cfg["crop_size"][0], self.multimodal_cfg["crop_size"][1])
+
         return ImageTaskSample(
             __key__=sample.__key__,
             __subflavor__=sample.__subflavor__,
             conversations=conversations,
+            #rewrite image so it creates tensor of zeros if not present
             image=processed_sample.get("image", torch.tensor([])),
-            tokens=tokens,
-            labels=labels,
-            attention_mask=attention_mask,
-            loss_mask=loss_mask,
+            tokens=tokens.squeeze(0),
+            labels=labels.squeeze(0),
+            attention_mask=attention_mask.squeeze(0),
+            loss_mask=loss_mask.squeeze(0),
+            position_ids=position_ids
+        )
+
+    def encode_similarity_interleaved(self, sample: SimilarityInterleavedSample) -> dict:
+        
+        # 4 fields: sample.images, sample.texts, sample.similarity_matrix, sample.matched_text_index
+        images, sentence_ixs = [], []
+        for sample_image, sim_vec in zip(sample.images, sample.matched_text_index):
+            images.append(sample_image)
+            sentence_ixs.append(sim_vec)
+            
+        # constrain max num images
+        max_num_images = self.max_num_images
+        if len(images) > max_num_images:
+            images = images[:max_num_images]
+            sentence_ixs = sentence_ixs[:max_num_images]
+        
+        images = [images[i] for i in np.argsort(sentence_ixs)]
+        
+        for ix in sentence_ixs:
+            sample.texts[ix] = f"{DEFAULT_IMAGE_TOKEN} {sample.texts[ix]}"
+        
+        if self.image_following_text_only:
+            # use pad token to divide sentence pieces
+            text = self.tokenizer.pad_id.join(sample.texts)
+        else:
+            text = " ".join(sample.texts)
+        
+        text = text.replace("<image> ", "<image>").replace(" <image>", "<image>")
+        text = f"{text}{self.tokenizer.eos_id}"
+        
+        if len(images) > 0:
+            processed_images = self.process_images(images)
+        else:
+            processed_images = None
+        
+        # check the case where the last token is the image token, do we ALSO need this for strictly interleaved?
+        if text.endswith(DEFAULT_IMAGE_TOKEN):
+            text = text[:-len(DEFAULT_IMAGE_TOKEN)]
+        
+        n_im_patch = text.count(DEFAULT_IMAGE_TOKEN)
+        processed_images = processed_images[:n_im_patch]
+        assert len(processed_images) == n_im_patch
+        
+        processed_sample = {
+            "conversations": text,
+            "image": processed_images
+        }
+        
+        if self.multimodal_cfg['is_multimodal']:
+            if images:
+                cur_token_len = self.calculate_token_length(processed_sample["image"])
+                processed_sample = preprocess_multimodal(
+                    [processed_sample],
+                    self.multimodal_cfg,
+                    cur_token_len,
+                    use_plain=(self.conv_template == "plain")
+                )[0]
+                
+        processed = self.preprocess_conversations([processed_sample])
+        
+        tokens = processed["tokens"]
+        labels = processed["labels"]
+        attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        #pad images
+        if images:
+            processed_sample["image"] = self.pad_images(processed_sample["image"], self.max_num_images)
+        
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __subflavor__=sample.__subflavor__,
+            conversations=processed_sample["conversations"],
+            image=processed_sample["image"],
+            tokens=tokens.squeeze(0),
+            labels=labels.squeeze(0),
+            attention_mask=attention_mask.squeeze(0),
+            loss_mask=loss_mask.squeeze(0),
             position_ids=position_ids
         )
 
@@ -162,33 +245,13 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         max_num_images = self.max_num_images
         if len(images) > max_num_images:
             images = images[:max_num_images]
-        
+
         if len(images) > 0:
             processed_images = self.process_images(images)
         else:
             processed_images = None
         
-        processed_images = self.process_images(images)
         combined_text = ' '.join(interleaved_text)
-        
-        
-        # TODO: check the case where the last token is the image token, do we ALSO need this for strictly interleaved?
-        # if input_ids[-1] == 0:
-        #     last_non_img_patch_idx = torch.where(input_ids == 0)[0][-1] + 1
-        #     input_ids = input_ids[:last_non_img_patch_idx]
-        
-        # if combined_text.endswith(DEFAULT_IMAGE_TOKEN):
-        #     combined_text = combined_text[:-len(DEFAULT_IMAGE_TOKEN)]
-        
-        # #n_im_patch = (input_ids == 0).sum().item()
-        # n_im_patch = combined_text.count(DEFAULT_IMAGE_TOKEN)
-        # processed_images = processed_images[:n_im_patch]
-        # assert len(processed_images) == n_im_patch
-        
-        # pad empty tensors to max_num_images
-        # if images is not None:
-        #     processed_sample["image"] = self.pad_images(processed_images, self.max_num_images)
-        
         
         processed_sample = {
             "conversations": combined_text,
@@ -212,15 +275,19 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         labels = processed["labels"]
         attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
         
+        #pad images
+        if images:
+            processed_sample["image"] = self.pad_images(processed_sample["image"], self.max_num_images)
+        
         return ImageTaskSample(
             __key__=sample.__key__,
             __subflavor__=sample.__subflavor__,
             conversations=processed_sample["conversations"],
             image=processed_sample["image"],
-            tokens=tokens,
-            labels=labels,
-            attention_mask=attention_mask,
-            loss_mask=loss_mask,
+            tokens=tokens.squeeze(0),
+            labels=labels.squeeze(0),
+            attention_mask=attention_mask.squeeze(0),
+            loss_mask=loss_mask.squeeze(0),
             position_ids=position_ids
         )
         
@@ -231,7 +298,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         for image in images:
             image = process_image(self.image_processor, image, self.multimodal_cfg['image_aspect_ratio'])
             processed_images.append(image)
-        return torch.stack(processed_images) if len(processed_images) > 1 else processed_images[0]
+        return torch.stack(processed_images) #make it always 4D, otherwise has problem when len(images) > 1
 
     def pad_images(self, images, max_num_images):
         if len(images) < max_num_images:
@@ -241,16 +308,22 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         return images
 
     def batch(self, samples: List[ImageTaskSample]) -> ImageTaskBatch:
+        
         batch = ImageTaskBatch(
-            __keys__=[s.__key__ for s in samples],
             tokens=batch_pad_stack([s.tokens for s in samples]),
             labels=batch_pad_stack([s.labels for s in samples]),
             attention_mask=batch_pad_stack([s.attention_mask for s in samples]),
             loss_mask=batch_pad_stack([s.loss_mask for s in samples]),
             position_ids=batch_pad_stack([s.position_ids for s in samples]),
-            media=torch.stack([s.image for s in samples if s.image is not None]) if self.multimodal_cfg['is_multimodal'] else None,
-            cu_seqlens=None
+            media=torch.stack([s.image for s in samples if s.image is not None]) if self.multimodal_cfg['is_multimodal'] else None
         )
+        
+        #TODO: cleanup, this is following logic in neva_dataset when we rearrange media tensor
+        if batch.media.shape[1] == 1:
+            batch.media = rearrange(batch.media, "b T c h w -> b T 1 c h w")
+        else:
+            batch.media = rearrange(batch.media, "b T c h w -> b 1 T c h w")
+        
         return batch
 
 
@@ -281,13 +354,18 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         return raw
 
     def calculate_token_length(self, media_tensor):
+        if len(media_tensor.shape) == 4:
+            height = media_tensor.shape[2]
+            width = media_tensor.shape[3]
+        else:
+            raise ValueError("Media tensor must be 4-dimensional")
         patch_dim = self.multimodal_cfg['patch_dim']
-        height_num_patches = media_tensor.shape[1] // patch_dim
-        width_num_patches = media_tensor.shape[2] // patch_dim
+        height_num_patches = height // patch_dim
+        width_num_patches = width // patch_dim
         if self.multimodal_cfg['mm_mlp_adapter_type'] == 'mlp_downsample':
             height_num_patches = (height_num_patches + 1) // 2 * 2
             width_num_patches = (width_num_patches + 1) // 2 * 2
-        
+
         return height_num_patches * width_num_patches
 
     def get_masks_and_position_ids(self, tokens, labels):
@@ -306,6 +384,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         labels[labels == -1] = 0
         
         return attention_mask, loss_mask, position_ids
+
 
 # Usage example:
 # neva_encoder = TaskEncoder(

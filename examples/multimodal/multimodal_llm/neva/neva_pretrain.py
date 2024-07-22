@@ -16,7 +16,7 @@
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
-from nemo.collections.multimodal.models.multimodal_llm.neva.neva_model import MegatronNevaModel
+from nemo.collections.multimodal.models.multimodal_llm.neva.neva_model_energon import MegatronNevaModel
 from nemo.collections.nlp.parts.megatron_trainer_builder import MegatronTrainerBuilder
 from nemo.core.config import hydra_runner
 from nemo.utils import logging
