@@ -136,16 +136,9 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         labels = processed["labels"]
         attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
         
-<<<<<<< HEAD
         if not image_present:
             processed_sample["image"] = torch.zeros(1, 3, self.multimodal_cfg["crop_size"][0], self.multimodal_cfg["crop_size"][1])
 
-=======
-        #add 1 dummy pad image when no image is present
-        if not image_present:
-            processed_sample["image"] = torch.zeros(1, 3, self.multimodal_cfg["crop_size"][0], self.multimodal_cfg["crop_size"][1])
-        
->>>>>>> 45fcc13e270279dee445c78f571e8d9fadc47764
         return ImageTaskSample(
             __key__=sample.__key__,
             __subflavor__=sample.__subflavor__,
