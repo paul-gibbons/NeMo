@@ -104,6 +104,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             attention_mask=attention_mask.squeeze(0),
             loss_mask=loss_mask.squeeze(0),
             position_ids=position_ids
+            
         )
 
     def encode_sft(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample]) -> dict:
@@ -135,9 +136,16 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         labels = processed["labels"]
         attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
         
+<<<<<<< HEAD
         if not image_present:
             processed_sample["image"] = torch.zeros(1, 3, self.multimodal_cfg["crop_size"][0], self.multimodal_cfg["crop_size"][1])
 
+=======
+        #add 1 dummy pad image when no image is present
+        if not image_present:
+            processed_sample["image"] = torch.zeros(1, 3, self.multimodal_cfg["crop_size"][0], self.multimodal_cfg["crop_size"][1])
+        
+>>>>>>> 45fcc13e270279dee445c78f571e8d9fadc47764
         return ImageTaskSample(
             __key__=sample.__key__,
             __subflavor__=sample.__subflavor__,
@@ -228,7 +236,86 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             loss_mask=loss_mask.squeeze(0),
             position_ids=position_ids
         )
-
+    
+    
+    def encode_similarity_interleaved(self, sample: SimilarityInterleavedSample) -> dict:
+        
+        # 4 fields: sample.images, sample.texts, sample.similarity_matrix, sample.matched_text_index
+        images, sentence_ixs = [], []
+        for sample_image, sim_vec in zip(sample.images, sample.matched_text_index):
+            images.append(sample_image)
+            sentence_ixs.append(sim_vec)
+            
+        # constrain max num images
+        max_num_images = self.max_num_images
+        if len(images) > max_num_images:
+            images = images[:max_num_images]
+            sentence_ixs = sentence_ixs[:max_num_images]
+        
+        images = [images[i] for i in np.argsort(sentence_ixs)]
+        
+        for ix in sentence_ixs:
+            sample.texts[ix] = f"{DEFAULT_IMAGE_TOKEN} {sample.texts[ix]}"
+        
+        if self.image_following_text_only:
+            # use pad token to divide sentence pieces
+            text = self.tokenizer.pad_id.join(sample.texts)
+        else:
+            text = " ".join(sample.texts)
+        
+        text = text.replace("<image> ", "<image>").replace(" <image>", "<image>")
+        text = f"{text}{self.tokenizer.eos_id}"
+        
+        if len(images) > 0:
+            processed_images = self.process_images(images)
+        else:
+            processed_images = None
+        
+        # check the case where the last token is the image token, do we ALSO need this for strictly interleaved?
+        if text.endswith(DEFAULT_IMAGE_TOKEN):
+            text = text[:-len(DEFAULT_IMAGE_TOKEN)]
+        
+        n_im_patch = text.count(DEFAULT_IMAGE_TOKEN)
+        processed_images = processed_images[:n_im_patch]
+        assert len(processed_images) == n_im_patch
+        
+        processed_sample = {
+            "conversations": text,
+            "image": processed_images
+        }
+        
+        if self.multimodal_cfg['is_multimodal']:
+            if images:
+                cur_token_len = self.calculate_token_length(processed_sample["image"])
+                processed_sample = preprocess_multimodal(
+                    [processed_sample],
+                    self.multimodal_cfg,
+                    cur_token_len,
+                    use_plain=(self.conv_template == "plain")
+                )[0]
+                
+        processed = self.preprocess_conversations([processed_sample])
+        
+        tokens = processed["tokens"]
+        labels = processed["labels"]
+        attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        #pad images
+        if images:
+            processed_sample["image"] = self.pad_images(processed_sample["image"], self.max_num_images)
+        
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __subflavor__=sample.__subflavor__,
+            conversations=processed_sample["conversations"],
+            image=processed_sample["image"],
+            tokens=tokens,
+            labels=labels,
+            attention_mask=attention_mask,
+            loss_mask=loss_mask,
+            position_ids=position_ids
+        )
+    
     def encode_interleaved(self, sample: InterleavedSample) -> dict:
         interleaved_text = []
         images = []
