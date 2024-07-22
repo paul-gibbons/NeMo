@@ -59,6 +59,8 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         self.max_num_images = 6
         self.image_following_text_only = False
 
+    
+
     def encode_sample(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample, SimilarityInterleavedSample]) -> dict:
         if isinstance(sample, InterleavedSample):
             return self.encode_interleaved(sample)
@@ -402,7 +404,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         if batch.media.shape[1] == 1:
             batch.media = rearrange(batch.media, "b T c h w -> b T 1 c h w")
         else:
-            batch.media = rearrange(batch.media, "b T c h w -> b 1 T c h w")
+            batch.media = rearrange(batch.media, "b T c h w -> b T 1 c h w")
         
         return batch
 

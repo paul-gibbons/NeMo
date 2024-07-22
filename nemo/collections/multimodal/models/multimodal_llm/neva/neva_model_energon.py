@@ -18,6 +18,7 @@ from itertools import chain
 from typing import Any, Optional
 
 import numpy as np
+from omegaconf import OmegaConf
 import torch
 import torch.nn.functional as F
 from einops import rearrange, reduce, repeat
@@ -1337,9 +1338,9 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             micro_batch_size = self.cfg.global_batch_size // parallel_state.get_data_parallel_world_size()
         #default for now
         #dname = args.data_path[0] if type(args.data_path) is list else args.data_path
-        #dname="/raid/pgibbons/data/energon_datasets/LLaVA-Pretrain-LCS-558K"
+        dname="/raid/pgibbons/data/energon_datasets/LLaVA-Pretrain-LCS-558K"
         #dname="/raid/pgibbons/data/energon_datasets/LLaVA-Instruct-150K"
-        dname= "/raid/pgibbons/data/energon_datasets/energon_datasets/obelisc/stage4/no-partial"
+        #dname= "/raid/pgibbons/data/energon_datasets/energon_datasets/obelisc/stage4/no-partial"
         """
         # Initialize NevaTaskEncoder
         neva_encoder = TaskEncoder(
@@ -1355,33 +1356,43 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
                 ),
                 model_cfg=self.cfg,
         """
-
-        #for testing purposes only, will move everything to yaml
-        multimodal_cfg = {
-        "is_multimodal": True,
-        "sep_image_conv_front": False,
-        "model_type": "interleaved",
-        "conv_template": "interleaved",
-        "patch_dim": 14,
-        "crop_size": (336, 336),
-        "image_aspect_ratio": 'square',
-        "use_im_start_end": False,
-        "image_processor": "openai/clip-vit-large-patch14",
-        "add_extra_token": 0,
-        "context_length": 4096,
-        "media_type": 'image',
-        "num_frames": -1,
-        "mm_mlp_adapter_type": 'linear',
-            }
-
-        data_cfg = {
-                "splice_single_frame": None,
-                "num_frames": -1,
-                "sep_token_between_frames": False,
-                }
+        #dname = OmegaConf.to_container(self.cfg.data_energon, resolve=True)
+        #dname = "/code/NeMo/examples/multimodal/multimodal_llm/neva/conf/data.yaml"
         image_processor=image_processor=(
                     self.model.module.image_processor if hasattr(self.model, "module") else self.model.image_processor
                 )
+        
+        add_extra_token = 1
+        if getattr(self.cfg, 'no_seqlen_plus_one_input_tokens', False):
+            add_extra_token = 0
+
+        multimodal_cfg = dict(
+            is_multimodal=self.cfg.data.is_multimodal,
+            sep_image_conv_front=self.cfg.data.sep_image_conv_front,
+            model_type=self.cfg.mm_cfg.llm.get("model_type", "nvgpt"),
+            conv_template=self.cfg.data.get("conv_template", "nvgpt"),
+            patch_dim=self.cfg.mm_cfg.vision_encoder.patch_dim,
+            crop_size=self.cfg.mm_cfg.vision_encoder.get("crop_size", (336, 336)),
+            image_folder=self.cfg.data.get('image_folder', None),
+            video_folder=self.cfg.data.get('video_folder', None),
+            image_aspect_ratio=self.cfg.data.image_aspect_ratio,
+            use_im_start_end=getattr(self.cfg.mm_cfg, 'use_im_start_end', False),
+            image_processor=image_processor,
+            add_extra_token=add_extra_token,
+            context_length=self.cfg.encoder_seq_length,
+            media_type=self.cfg.data.get('media_type', 'image'),
+            num_frames=self.cfg.data.get('num_frames', -1),
+            use_lita=getattr(self.cfg.mm_cfg, 'use_lita', False),
+            lita=getattr(self.cfg.mm_cfg, 'lita', {}),
+            mm_mlp_adapter_type=self.cfg.mm_cfg.get('mm_mlp_adapter_type', 'linear'),
+            )
+
+        data_cfg = dict(
+            splice_single_frame=self.cfg.data.get('splice_single_frame', None),
+            num_frames=self.cfg.data.get('num_frames', -1),
+            sep_token_between_frames=self.cfg.data.get('sep_token_between_frames', False),
+        )
+    
         train_dataset = get_train_dataset(
             dname,
             batch_size=micro_batch_size,
@@ -1445,15 +1456,18 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         train_ds, valid_ds1, test_ds = self.datasets_provider(worker_config)
         train_dataloader = get_savable_loader(train_ds, worker_config=worker_config)
         # Handle checkpoint loading if needed
-            # Handle checkpoint loading if needed
         restore = False
-        if restore==True:
+        # restore the dataloader if the self.trainer.ckpt_path exists!
+        restore = os.path.exists(self.trainer.ckpt_path) if self.trainer.ckpt_path else False
+        if restore:
             dp_rank = parallel_state.get_data_parallel_rank()
             #step = self.trainer.global_step
-            step=60
+            step=int(self.init_consumed_samples / self.cfg.micro_batch_size / world_size)
             # Load the dataloader state from the checkpoint if it exists 
             #checkpoint_dir = 
-            data_save_name = os.path.join("/neva_llama_2/experiments/nemo_video_neva/checkpoints/", f"train_dataloader_dprank{dp_rank:03d}_step{step}.pt")
+            #use the directory of self.trainer.ckpt_path
+            checkpoint_dir = os.path.dirname(self.trainer.ckpt_path)
+            data_save_name = os.path.join(checkpoint_dir, f"train_dataloader_dprank{dp_rank:03d}_step{step}.pt")
 
             if os.path.exists(data_save_name):
                 try:
