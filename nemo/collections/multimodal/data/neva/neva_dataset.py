@@ -633,6 +633,12 @@ def preprocess_interleaved_prompt(
     labels[labels == 0] = IGNORE_INDEX
     labels[labels == pad_id] = IGNORE_INDEX
     
+    if add_extra_token:
+        tokens = tokens[:, :-1].contiguous()
+        labels = labels[:, 1:].contiguous()
+    else:
+        labels = torch.roll(labels, shifts=-1, dims=-1)
+        labels[:, -1] = IGNORE_INDEX
     
     return dict(
         tokens=tokens,
@@ -1414,3 +1420,4 @@ class NevaPackedSeqDatatset(Dataset):
         }
 
         return batch
+                                 
