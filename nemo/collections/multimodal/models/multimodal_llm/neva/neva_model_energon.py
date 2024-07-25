@@ -87,6 +87,13 @@ from megatron.energon import (
     get_val_datasets,
 )
 
+from megatron.core.dist_checkpointing.mapping import LocalNonpersitentObject, ShardedObject
+from megatron.core import dist_checkpointing
+from megatron.core.dist_checkpointing.strategies.torch import (
+    TorchDistLoadShardedStrategy,
+    TorchDistSaveShardedStrategy
+)
+
 try:
     import apex.transformer.pipeline_parallel.utils
     from apex.transformer.pipeline_parallel.utils import get_num_microbatches
@@ -1240,7 +1247,13 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         else:
             # TODO: consider adding a ModelPT guard to check if model is being restored.
             # allowing restored models to optionally setup datasets
-            self.build_train_valid_test_datasets_energon()
+            if self.cfg.get('energon', False):
+                self.build_train_valid_test_datasets_energon()
+            else:
+                self.build_train_valid_test_datasets()
+                self.setup_training_data(self.cfg.data)
+                self.setup_validation_data(self.cfg.data)
+                self.setup_test_data(self.cfg.data)  
 
         # when using pipeline model parallel the final stage need to initialize word embeddings
         if parallel_state.get_pipeline_model_parallel_world_size() > 1:
@@ -1338,9 +1351,12 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             micro_batch_size = self.cfg.global_batch_size // parallel_state.get_data_parallel_world_size()
         #default for now
         #dname = args.data_path[0] if type(args.data_path) is list else args.data_path
-        dname="/raid/pgibbons/data/energon_datasets/LLaVA-Pretrain-LCS-558K"
+        #dname="/raid/pgibbons/data/energon_datasets/LLaVA-Pretrain-LCS-558K"
         #dname="/raid/pgibbons/data/energon_datasets/LLaVA-Instruct-150K"
         #dname= "/raid/pgibbons/data/energon_datasets/energon_datasets/obelisc/stage4/no-partial"
+
+        dname = OmegaConf.to_container(self.cfg.data_energon, resolve=True)
+        #dname = "/code/NeMo/examples/multimodal/multimodal_llm/neva/conf/data.yaml"
         """
         # Initialize NevaTaskEncoder
         neva_encoder = TaskEncoder(
@@ -1356,8 +1372,7 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
                 ),
                 model_cfg=self.cfg,
         """
-        #dname = OmegaConf.to_container(self.cfg.data_energon, resolve=True)
-        #dname = "/code/NeMo/examples/multimodal/multimodal_llm/neva/conf/data.yaml"
+
         image_processor=image_processor=(
                     self.model.module.image_processor if hasattr(self.model, "module") else self.model.image_processor
                 )
@@ -1412,7 +1427,6 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         dname,
         batch_size=micro_batch_size,
         # This is the total number over all workers
-        # limit=args.eval_iters * get_num_microbatches(),
         task_encoder=TaskEncoder(
             tokenizer=self.tokenizer,
             image_processor=image_processor,
@@ -1428,7 +1442,7 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             LimitDataset(
                 # Repeat the inner dataset in case it's too short
                 RepeatDataset(val_ds, worker_config=worker_config),
-                length=2,
+                length=self.cfg.micro_batch_size*self.trainer.limit_val_batches,
                 worker_config=worker_config,
                 reset_after_epoch=True,
             )
@@ -1455,27 +1469,22 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         )
         train_ds, valid_ds1, test_ds = self.datasets_provider(worker_config)
         train_dataloader = get_savable_loader(train_ds, worker_config=worker_config)
-        # Handle checkpoint loading if needed
-        restore = False
-        # restore the dataloader if the self.trainer.ckpt_path exists!
+
+        # Restore energon train dataloader state if we are resuming training
         restore = os.path.exists(self.trainer.ckpt_path) if self.trainer.ckpt_path else False
         if restore:
-            dp_rank = parallel_state.get_data_parallel_rank()
-            #step = self.trainer.global_step
-            step=int(self.init_consumed_samples / self.cfg.micro_batch_size / world_size)
-            # Load the dataloader state from the checkpoint if it exists 
-            #checkpoint_dir = 
-            #use the directory of self.trainer.ckpt_path
-            checkpoint_dir = os.path.dirname(self.trainer.ckpt_path)
-            data_save_name = os.path.join(checkpoint_dir, f"train_dataloader_dprank{dp_rank:03d}_step{step}.pt")
+            sharded_state_dict = {
+                'dataloader_state': ShardedObject(
+                data=None,
+                key='dataloader_state',
+                global_shape=[parallel_state.get_data_parallel_world_size()],
+                global_offset=[parallel_state.get_data_parallel_rank()],
+            )
+            }
+            state_dict = dist_checkpointing.load(sharded_state_dict, self.trainer.ckpt_path)
+            train_dataloader.restore_state_rank(state_dict['dataloader_state'])
+            logging.info(f"Restored dataset state from {self.trainer.ckpt_path}")
 
-            if os.path.exists(data_save_name):
-                try:
-                    dataset_state_dict = torch.load(data_save_name, map_location="cpu")
-                    train_dataloader.restore_state_rank(dataset_state_dict["dataloader_state_dict"])
-                    logging.info(f"Restored dataset state from {data_save_name}")
-                except Exception as e:
-                    logging.warning(f"Loading dataloader checkpoint failed. Skipping. {str(e)}")
         
         valid_dataloader = [
             get_loader(valid_ds, worker_config=worker_config) for valid_ds in valid_ds1
@@ -1561,6 +1570,47 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
                     parallel_state.set_virtual_pipeline_model_parallel_rank(i)
                     self.model[i].module.load_state_dict(checkpoint[f'model{i}'], strict=True)
                 parallel_state.set_virtual_pipeline_model_parallel_rank(0)
+
+    def on_save_checkpoint(self, checkpoint) -> None:
+         """LightningModule hook:
+         https://pytorch-lightning.readthedocs.io/en/stable/common/lightning_module.html#on-save-checkpoint
+         """
+
+         #Neva supports Megatron Energon dataloader, this requires saving the dataloader state on each data parallel group
+         def should_save_dataloader_state():
+            if self._train_dl is None:
+                return False
+            if not hasattr(self._train_dl, "save_state"):
+                return False
+            first_rank = parallel_state.is_pipeline_first_stage(ignore_virtual=True) and parallel_state.get_tensor_model_parallel_rank() == 0
+            return first_rank
+
+         def save_dataloader_state():
+            train_dataloader_state_dict = self._train_dl.save_state_rank()
+            checkpoint['dataloader_state'] = ShardedObject(
+                data=train_dataloader_state_dict,
+                key='dataloader_state',
+                global_shape=[parallel_state.get_data_parallel_world_size()],
+                global_offset=[parallel_state.get_data_parallel_rank()],
+            )
+
+         # Save energon train dataloader state if conditions are met
+         if not self.cfg.get('energon', False) and should_save_dataloader_state():
+            save_dataloader_state()
+         
+        # mcore uses distributed checkpointing
+         # FSDP supports the lagecy checkpointing or torch-FSDP-native sharded checkpointing
+         if self.mcore_gpt and not self.use_fsdp:
+             checkpoint['sharded_state_dict'] = self.sharded_state_dict()
+
+         # legacy checkpointing for interleaved
+         else:
+             if isinstance(self.model, list):
+                 for i in range(len(self.model)):
+                     parallel_state.set_virtual_pipeline_model_parallel_rank(i)
+                     checkpoint[f'model{i}'] = self.model[i].module.state_dict_for_save_checkpoint()
+                 parallel_state.set_virtual_pipeline_model_parallel_rank(0)
+
 
     def sharded_state_dict(self, prefix: str = ''):
         if self.use_peft:
