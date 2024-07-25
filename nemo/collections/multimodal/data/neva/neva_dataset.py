@@ -1418,6 +1418,4 @@ class NevaPackedSeqDatatset(Dataset):
             "labels": torch.LongTensor(self.ds[doc_start + 2]),
             "image": torch.FloatTensor(self.ds[doc_start + 3]).reshape(-1, 3, *self.crop_size),
         }
-
         return batch
-                                 
