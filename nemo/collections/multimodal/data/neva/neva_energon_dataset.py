@@ -67,8 +67,8 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         elif isinstance(sample, VQASample):
             return self.encode_pretrain(sample)
         elif isinstance(sample, SimilarityInterleavedSample):
-            #return self.encode_similarity_interleaved(sample)
-            return self.encode_sft(sample)
+            return self.encode_similarity_interleaved(sample)
+            #return self.encode_sft(sample)
         else:
             return self.encode_sft(sample)
 
@@ -155,8 +155,6 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         )
 
 
-    
-    
     def encode_similarity_interleaved(self, sample: SimilarityInterleavedSample) -> dict:
         
         # 4 fields: sample.images, sample.texts, sample.similarity_matrix, sample.matched_text_index
@@ -190,7 +188,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         else:
             processed_images = None
         
-        # check the case where the last token is the image token, do we ALSO need this for strictly interleaved?
+        # check the case where the last token is the image token.
         if text.endswith(DEFAULT_IMAGE_TOKEN):
             text = text[:-len(DEFAULT_IMAGE_TOKEN)]
         
@@ -222,33 +220,61 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         #pad images
         if images:
             processed_sample["image"] = self.pad_images(processed_sample["image"], self.max_num_images)
+        else:
+            # add extra dummy images
+            processed_sample["image"] = torch.zeros(self.max_num_images, 3, self.multimodal_cfg["crop_size"][0], self.multimodal_cfg["crop_size"][1])
         
         return ImageTaskSample(
             __key__=sample.__key__,
             __subflavor__=sample.__subflavor__,
             conversations=processed_sample["conversations"],
             image=processed_sample["image"],
-            tokens=tokens,
-            labels=labels,
-            attention_mask=attention_mask,
-            loss_mask=loss_mask,
+            tokens=tokens.squeeze(0),
+            labels=labels.squeeze(0),
+            attention_mask=attention_mask.squeeze(0),
+            loss_mask=loss_mask.squeeze(0),
             position_ids=position_ids
         )
     
+    
     def encode_interleaved(self, sample: InterleavedSample) -> dict:
+        """this function is used to encode strictly interleaved samples
+        there are few cases where the image token is not interleaved with the text
+        in those cases, we need to remove the excess image tokens or pad the images correctly.
+
+        few edge cases: 
+        1) [DONE] when no image token is present in the text
+        2) [DONE] when first tokens are mostly image tokens, follow by text tokens only or text tokens/images interleaved, after truncation, there will be only images left.
+        3) [DONE verified that this won't happen] when last tokens are mostly image tokens, follow by text tokens only or text tokens/images interleaved (need to conisder what
+        happened after truncate the image tokens, as the image end id token will be truncated, causing assertion error)
+        4) [DONE] when image tokens are interleaved with text tokens, but the last token is image token, which might longer than the max_seq_len
+        5) [DONE] when image tokens are interleaved with text tokens, but the last token is text token, which might longer than the max_seq_len
+        6) [DONE we have padding machanism for this] when image tokens are interleaved with text tokens, but after removing the excess image tokens, there is only text tokens left
+        
+        Args:
+            sample (InterleavedSample): after preprocessed by Energon, the sample looks like this:
+        Returns:
+            dict: tokenized inputs, attention mask, loss mask, position ids
+        """
         interleaved_text = []
         images = []
         for item in sample.sequence:
             if isinstance(item, str):
                 interleaved_text.append(item)
-            elif isinstance(item, torch.Tensor) or isinstance(item, str):
+            elif isinstance(item, torch.Tensor):
                 interleaved_text.append(DEFAULT_IMAGE_TOKEN)
                 images.append(item)
             else:
                 raise ValueError(f"Unsupported type in interleaved sequence: {type(item)}")
-            
+        
         # constrain max num images
         max_num_images = self.max_num_images
+        
+        n_im_patch = interleaved_text.count(DEFAULT_IMAGE_TOKEN)
+        if n_im_patch > max_num_images:
+            interleaved_text, kept_image_indices = self.remove_excess_image_tokens(interleaved_text, max_num_images)
+            images = [images[i] for i in kept_image_indices]
+        
         if len(images) > max_num_images:
             images = images[:max_num_images]
 
@@ -256,6 +282,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             processed_images = self.process_images(images)
         else:
             processed_images = None
+            
         
         combined_text = ' '.join(interleaved_text)
         
@@ -279,12 +306,14 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         
         tokens = processed["tokens"]
         labels = processed["labels"]
+        
         attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
         
         #pad images
         if images:
             processed_sample["image"] = self.pad_images(processed_sample["image"], self.max_num_images)
         else:
+            # add extra dummy images for edge case 1
             processed_sample["image"] = torch.zeros(self.max_num_images, 3, self.multimodal_cfg["crop_size"][0], self.multimodal_cfg["crop_size"][1])
         
         return ImageTaskSample(
@@ -298,7 +327,42 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             loss_mask=loss_mask.squeeze(0),
             position_ids=position_ids
         )
+    
+    def remove_excess_image_tokens(self, interleaved_text, max_num_images):
+        # implement a mechanism to remove excess image tokens
         
+        if interleaved_text[-1] == DEFAULT_IMAGE_TOKEN:
+            interleaved_text = interleaved_text[:-1]
+            
+        image_indices = [i for i, token in enumerate(interleaved_text) if token == DEFAULT_IMAGE_TOKEN]
+    
+        if len(image_indices) <= max_num_images:
+            return interleaved_text, list(range(len(image_indices)))
+        
+        # we keep the images that are close to the text tokens
+        importance = []
+        for i, img_idx in enumerate(image_indices):
+            has_text_before = img_idx > 0 and interleaved_text[img_idx - 1] != DEFAULT_IMAGE_TOKEN
+            has_text_after = img_idx < len(interleaved_text) - 1 and interleaved_text[img_idx + 1] != DEFAULT_IMAGE_TOKEN
+        
+            if has_text_before and has_text_after:
+                importance.append((0, img_idx))  # highest importance
+            elif has_text_before or has_text_after:
+                importance.append((1, img_idx))  
+            else:
+                importance.append((2, img_idx))  
+                
+        importance.sort(key=lambda x: (x[0], x[1]))
+        kept_indices = {idx for _, idx in importance[:max_num_images]}
+
+        # update idx to map correctly to the original images array
+        kept_image_indices = [image_indices.index(i) for i in kept_indices if i in image_indices]
+
+        new_interleaved_text = [token for i, token in enumerate(interleaved_text) if token != DEFAULT_IMAGE_TOKEN or i in kept_indices]
+
+        return new_interleaved_text, kept_image_indices
+            
+
     def process_images(self, images):
         if not isinstance(images, list):
             images = [images]
