@@ -1595,7 +1595,7 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             )
 
          # Save energon train dataloader state if conditions are met
-         if not self.cfg.get('energon', False) and should_save_dataloader_state():
+         if self.cfg.get('energon', False) and should_save_dataloader_state():
             save_dataloader_state()
          
         # mcore uses distributed checkpointing
