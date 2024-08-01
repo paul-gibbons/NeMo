@@ -436,6 +436,24 @@ class NeMoModelCheckpoint(ModelCheckpoint):
         exists = self._fs.exists(filepath) or (check_dist_ckpt and self._fs.exists(ckpt_to_dir(filepath)))
         return trainer.strategy.broadcast(exists)
 
+    @staticmethod
+    def _link_checkpoint(trainer: 'pytorch_lightning.Trainer', filepath: str, linkpath: str) -> None:
+        #linkpath = ckpt_to_dir(linkpath)
+        filepath = ckpt_to_dir(filepath)
+        if trainer.is_global_zero:
+            linkpath = ckpt_to_dir(linkpath)
+            if os.path.islink(linkpath) or os.path.isfile(linkpath):
+                os.remove(linkpath)
+            elif os.path.isdir(linkpath):
+                shutil.rmtree(linkpath)
+            try:
+                os.symlink(os.path.relpath(filepath, os.path.dirname(linkpath)), linkpath)
+            except OSError:
+                # on Windows, special permissions are required to create symbolic links as a regular user
+                # fall back to copying the file
+                shutil.copy(filepath, linkpath)
+        trainer.strategy.barrier()
+    
     def _save_checkpoint(self, trainer: 'pytorch_lightning.Trainer', filepath: str) -> None:
         # barrier_after=True, so all ranks continue after the unfinished checkpoint marker is placed.
         # if anything goes wrong during checkpointing, we should be able to detect that data is incomplete.
@@ -514,6 +532,7 @@ class NeMoModelCheckpoint(ModelCheckpoint):
         is actually finished so we can't remove it. Instead we add it to
         `self.deferred_ckpts_to_remove` for future removal.
         """
+        filepath =ckpt_to_dir(filepath)
         if self.async_save and not override_async:
             # Register checkpoint removal in the last (active) checkpoint removal list
             self.deferred_ckpts_to_remove[-1].append(filepath)
@@ -521,7 +540,13 @@ class NeMoModelCheckpoint(ModelCheckpoint):
         # barrier_after=True, so all ranks continue after the unfinished checkpoint marker is placed.
         # if anything goes wrong during removal, we should be able to detect that data is incomplete.
         self.set_checkpoint_unfinished_marker(filepath, barrier_after=True)
-        super()._remove_checkpoint(trainer, filepath)
+            # Check if the filepath is a symlink
+        if os.path.islink(filepath):
+            #filepath =ckpt_to_dir(filepath)
+            if trainer.is_global_zero:
+                os.unlink(filepath)  # Remove the symlink
+        else:
+            super()._remove_checkpoint(trainer, filepath)
         ema_callback = self._ema_callback(trainer)
         if ema_callback is not None:
             # remove EMA copy of the state dict as well.

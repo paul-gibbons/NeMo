@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from shutil import copy, move
-from typing import Any, Collection, Dict, List, Optional, Tuple, Union
+from typing import Any, Collection, Dict, List, Literal, Optional, Tuple, Union
 
 import pytorch_lightning
 import torch
@@ -109,7 +109,7 @@ class CallbackParams:
     filename: Optional[str] = None  # If None, exp_manager will attempt to handle the filepath
     monitor: Optional[str] = "val_loss"
     verbose: Optional[bool] = True
-    save_last: Optional[bool] = True
+    save_last: Optional[Union[bool, str]] = None
     save_top_k: Optional[int] = 3
     save_weights_only: Optional[bool] = False
     mode: Optional[str] = "min"
