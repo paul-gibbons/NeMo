@@ -84,6 +84,12 @@ except (ImportError, ModuleNotFoundError):
     HAVE_MEGATRON_CORE = False
 
 
+
+
+from VILA.llava.model.multimodal_encoder.intern_encoder import InternVisionTower
+from VILA.llava.model.multimodal_encoder.intern.configuration_intern_vit import InternVisionConfig
+from VILA.llava.model.multimodal_encoder.intern.modeling_intern_vit import InternVisionModel
+
 class FrozenCLIPVisionTransformer(CLIPVisionTransformer):
     """Frozen version of CLIPVisionTransformer"""
 
@@ -498,6 +504,11 @@ class NevaBaseModel:
                     for param in vision_encoder.parameters():
                         param.requires_grad = False
                     vision_encoder = vision_encoder.eval()
+            elif config.architectures[0] == "InternVisionModel":
+                vision_encoder = InternVisionModel.from_pretrained(
+                    mm_cfg.vision_encoder.from_pretrained,
+                    torch_dtype=torch.bfloat16,
+                ).cuda()
             else:
                 raise (ValueError("Currently only support CLIPVisionModel and SigLipVisionModel from Huggingface"))
         else:

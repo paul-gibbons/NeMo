@@ -33,6 +33,10 @@ from nemo.collections.nlp.parts.utils_funcs import torch_dtype_from_precision
 from nemo.utils import AppState, logging
 from nemo.utils.model_utils import inject_model_parallel_rank
 
+from VILA.llava.model.multimodal_encoder.intern_encoder import InternVisionTower
+from VILA.llava.model.multimodal_encoder.intern.configuration_intern_vit import InternVisionConfig
+from VILA.llava.model.multimodal_encoder.intern.modeling_intern_vit import InternVisionModel
+
 try:
     from megatron.core import dist_checkpointing
 
@@ -537,12 +541,17 @@ def create_image_processor(mm_cfg):
         from transformers import AutoConfig
 
         config = AutoConfig.from_pretrained(mm_cfg.vision_encoder.from_pretrained)
-        if config.architectures[0] == "CLIPVisionModel":
+        if config.architectures[0] == "CLIPVisionModel" or config.architectures[0] == "CLIPModel":
             image_processor = CLIPImageProcessor.from_pretrained(
                 mm_cfg.vision_encoder.from_pretrained, torch_dtype=torch.bfloat16
             )
-        elif config.architectures[0] == "SiglipVisionModel":
+        elif config.architectures[0] == "SiglipVisionModel" or config.architectures[0] == "SiglipModel":
             image_processor = SiglipImageProcessor.from_pretrained(
+                mm_cfg.vision_encoder.from_pretrained, torch_dtype=torch.bfloat16
+            )
+        elif config.architectures[0] == "InternVisionModel":
+            from VILA.llava.model.multimodal_encoder.intern.processing_intern_vit import InternImageProcessor
+            image_processor = InternImageProcessor.from_pretrained(
                 mm_cfg.vision_encoder.from_pretrained, torch_dtype=torch.bfloat16
             )
         else:
