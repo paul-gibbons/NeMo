@@ -202,13 +202,12 @@ def adjust_tensor_shapes(model, nemo_state_dict):
 
 
 def adjust_nemo_config(model_config, ref_config):
-    model_config.mm_cfg.mm_mlp_adapter_type = "mlp2x_gelu"
-    if ref_config["vision_config"].image_size == 336:
-        model_config.mm_cfg.vision_encoder.from_pretrained = "openai/clip-vit-large-patch14-336"
-        model_config.data.image_token_len = 576
-    else:
-        model_config.mm_cfg.vision_encoder.from_pretrained = "openai/clip-vit-large-patch14"
-        model_config.data.image_token_len = 256
+    #model_config.mm_cfg.mm_mlp_adapter_type = "mlp2x_gelu"
+    #if ref_config["vision_config"].image_size == 336:
+    #    model_config.mm_cfg.vision_encoder.from_pretrained = "openai/clip-vit-large-patch14-336"
+    #    model_config.data.image_token_len = 576
+    ##    model_config.mm_cfg.vision_encoder.from_pretrained = "openai/clip-vit-large-patch14"
+    #   model_config.data.image_token_len = 256
 
     ref_config = ref_config['text_config'].__dict__
     model_config["encoder_seq_length"] = ref_config["max_position_embeddings"]
@@ -258,7 +257,7 @@ def get_args():
 
 def convert(args):
     logging.info(f"Loading checkpoint from HF Llava: `{args.input_name_or_path}`")
-    hf_tokenizer = LlamaTokenizer.from_pretrained(args.input_name_or_path)
+    hf_tokenizer = LlamaTokenizer.from_pretrained(args.tokenizer_path)
     hf_model = LlavaForConditionalGeneration.from_pretrained(args.input_name_or_path)
     logging.info("HF Model loading done.")
 
@@ -292,7 +291,7 @@ def convert(args):
         batch_dict = hf_tokenizer(input_texts, max_length=512, padding=True, truncation=True, return_tensors='pt')
         batch_dict_cuda = {k: v.cuda() for k, v in batch_dict.items()}
         hf_model = hf_model.cuda().eval()
-        model = model.eval()
+        model = model.cuda().eval()
 
         hf_outputs = hf_model(**batch_dict_cuda, output_hidden_states=True)
         ids = batch_dict_cuda['input_ids']
@@ -307,7 +306,7 @@ def convert(args):
             attn_mask, _, pos_ids = attn_mask_and_pos_ids
 
             outputs = model(
-                tokens=tokens, text_position_ids=pos_ids.cuda(), attention_mask=attn_mask.cuda(), labels=None
+                tokens=tokens.cuda(), text_position_ids=pos_ids.cuda(), attention_mask=attn_mask.cuda(), labels=None
             )
 
         hf_next_token = hf_outputs.logits[0, -1].argmax()

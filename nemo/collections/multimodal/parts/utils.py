@@ -33,9 +33,9 @@ from nemo.collections.nlp.parts.utils_funcs import torch_dtype_from_precision
 from nemo.utils import AppState, logging
 from nemo.utils.model_utils import inject_model_parallel_rank
 
-from VILA.llava.model.multimodal_encoder.intern_encoder import InternVisionTower
-from VILA.llava.model.multimodal_encoder.intern.configuration_intern_vit import InternVisionConfig
-from VILA.llava.model.multimodal_encoder.intern.modeling_intern_vit import InternVisionModel
+from llava.model.multimodal_encoder.intern_encoder import InternVisionTower
+from llava.model.multimodal_encoder.intern.configuration_intern_vit import InternVisionConfig
+from llava.model.multimodal_encoder.intern.modeling_intern_vit import InternVisionModel
 
 try:
     from megatron.core import dist_checkpointing
@@ -550,12 +550,10 @@ def create_image_processor(mm_cfg):
                 mm_cfg.vision_encoder.from_pretrained, torch_dtype=torch.bfloat16
             )
         elif config.architectures[0] == "InternVisionModel":
-            from VILA.llava.model.multimodal_encoder.intern.processing_intern_vit import InternImageProcessor
-            image_processor = InternImageProcessor.from_pretrained(
-                mm_cfg.vision_encoder.from_pretrained, torch_dtype=torch.bfloat16
-            )
+            from llava.model.multimodal_encoder.intern_encoder import InternVisionPreprocessor
+            image_processor = InternVisionPreprocessor()
         else:
-            raise (ValueError("Currently only support CLIPImageProcessor and SiglipImageProcessor from Huggingface"))
+            raise ValueError("Currently only support CLIPImageProcessor, SiglipImageProcessor, and InternVisionPreprocessor")
 
         crop_size = mm_cfg.vision_encoder.get("crop_size")
         if hasattr(image_processor, 'crop_size') and crop_size is not None:

@@ -34,7 +34,8 @@ from argparse import ArgumentParser
 from collections import OrderedDict
 
 import torch
-from llava import LlavaLlamaForCausalLM
+#from llava.model import *
+from llava.model import LlavaLlamaForCausalLM
 from omegaconf import OmegaConf
 from pytorch_lightning.core.saving import _load_state as ptl_load_state
 from pytorch_lightning.trainer.trainer import Trainer
