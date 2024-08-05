@@ -65,6 +65,10 @@ from nemo.core import adapter_mixins
 from nemo.core.classes.common import PretrainedModelInfo
 from nemo.utils import logging
 
+from llava.model.multimodal_encoder.intern_encoder import InternVisionTower
+from llava.model.multimodal_encoder.intern.configuration_intern_vit import InternVisionConfig
+from llava.model.multimodal_encoder.intern.modeling_intern_vit import InternVisionModel
+
 try:
     from megatron.core import InferenceParams, dist_checkpointing, parallel_state, tensor_parallel
     from megatron.core.dist_checkpointing.dict_utils import dict_list_map_inplace
@@ -142,7 +146,7 @@ class NevaWordEmbeddingMixin(torch.nn.Module, adapter_mixins.AdapterModuleMixin)
         use_im_start_end=False,
     ):
         self.vision_encoder = vision_encoder
-        self.from_hf = isinstance(vision_encoder, CLIPVisionModel) or isinstance(vision_encoder, SiglipVisionModel)
+        self.from_hf = isinstance(vision_encoder, CLIPVisionModel) or isinstance(vision_encoder, SiglipVisionModel) or isinstance(vision_encoder, InternVisionModel)
         self.media_start_id = media_start_id
         self.media_end_id = media_end_id
         self.class_token_length = class_token_length
@@ -478,10 +482,13 @@ class NevaBaseModel:
     def create_vision_encoder_and_processor(self, mm_cfg):
         # Initialize vision encoder and freeze it
         if mm_cfg.vision_encoder.get("from_hf", False):
+            from transformers import AutoConfig
+
+            config = AutoConfig.from_pretrained(mm_cfg.vision_encoder.from_pretrained)
             if (
                 "clip" in mm_cfg.vision_encoder.from_pretrained
                 or "vit" in mm_cfg.vision_encoder.from_pretrained
-                or "clip" in mm_cfg.vision_encoder.get("model_type", "")
+                or config.architectures[0] in ["CLIPVisionModel", "CLIPModel"]
             ):
                 vision_encoder = CLIPVisionModel.from_pretrained(
                     mm_cfg.vision_encoder.from_pretrained,
@@ -492,8 +499,9 @@ class NevaBaseModel:
                     for param in vision_encoder.parameters():
                         param.requires_grad = False
                     vision_encoder = vision_encoder.eval()
-            elif "siglip" in mm_cfg.vision_encoder.from_pretrained or "siglip" in mm_cfg.vision_encoder.get(
-                "model_type", ""
+            elif (
+                "siglip" in mm_cfg.vision_encoder.from_pretrained
+                or config.architectures[0] in ["SiglipVisionModel", "SiglipModel"]
             ):
                 vision_encoder = SiglipVisionModel.from_pretrained(
                     mm_cfg.vision_encoder.from_pretrained,
@@ -504,8 +512,18 @@ class NevaBaseModel:
                     for param in vision_encoder.parameters():
                         param.requires_grad = False
                     vision_encoder = vision_encoder.eval()
+            elif config.architectures[0] == "InternVisionModel":
+                vision_encoder = InternVisionModel.from_pretrained(
+                    mm_cfg.vision_encoder.from_pretrained,
+                    torch_dtype=torch.bfloat16,
+                ).cuda()
+                vision_encoder = vision_encoder.to(torch.bfloat16)
+                if mm_cfg.vision_encoder.freeze:
+                    for param in vision_encoder.parameters():
+                        param.requires_grad = False
+                    vision_encoder = vision_encoder.eval()
             else:
-                raise (ValueError("Currently only support CLIPVisionModel and SigLipVisionModel from Huggingface"))
+                raise ValueError("Currently only support CLIPVisionModel, SigLipVisionModel, and InternVisionModel from Huggingface")
         else:
             vision_cfg = MegatronCLIPModel.restore_from(
                 mm_cfg.vision_encoder.from_pretrained, return_config=True
@@ -516,7 +534,6 @@ class NevaBaseModel:
                 vision_encoder.freeze()
 
         image_processor = create_image_processor(mm_cfg)
-
         return vision_encoder, image_processor
 
     def freeze_llm(self, mm_cfg):

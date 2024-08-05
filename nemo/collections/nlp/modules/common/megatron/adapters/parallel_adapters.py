@@ -989,7 +989,7 @@ class DownSampleBlock(nn.Module):
         return vit_embeds
 
     def flat_square(self, x):
-        b, T, F, h, w, c = x.size()
+        b, T, F, w, h, c = x.size()
         if w % 2 == 1:
             x = torch.cat([x, torch.zeros((b, T, F, h, 1, c), dtype=x.dtype).to(x.device)], dim=4)
             b, T, F, h, w, c = x.size()
