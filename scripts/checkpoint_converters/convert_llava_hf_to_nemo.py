@@ -111,8 +111,8 @@ def create_rename_keys(num_hidden_layers):
         rename_keys.extend([
             (f"llm.model.layers.{i}.input_layernorm.weight", f"model.module.decoder.layers.{i}.self_attention.linear_qkv.layer_norm_weight"),
             (f"llm.model.layers.{i}.mlp.down_proj.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc2.weight"),
-            (f"llm.model.layers.{i}.mlp.gate_proj.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc1.weight"),
-            (f"llm.model.layers.{i}.mlp.up_proj.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc1.weight"),
+            (f"llm.model.layers.{i}.mlp.gate_proj.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc1_gate.weight"),
+            (f"llm.model.layers.{i}.mlp.up_proj.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc1_proj.weight"),
             (f"llm.model.layers.{i}.post_attention_layernorm.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc1.layer_norm_weight"),
             (f"llm.model.layers.{i}.self_attn.o_proj.weight", f"model.module.decoder.layers.{i}.self_attention.linear_proj.weight"),
             (f"llm.model.layers.{i}.self_attn.q_proj.weight", f"model.module.decoder.layers.{i}.self_attention.linear_q.weight"),
