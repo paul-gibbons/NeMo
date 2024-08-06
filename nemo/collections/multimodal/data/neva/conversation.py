@@ -504,7 +504,7 @@ conv_mistral = Conversation(
 )
 
 conv_yi_34b=Conversation(
-    system="",
+    system="Answer the questions.",
     roles=('user', 'assistant'),
     version="1.5",
     messages=(),

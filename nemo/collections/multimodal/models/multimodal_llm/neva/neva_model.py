@@ -207,6 +207,7 @@ class NevaWordEmbeddingMixin(torch.nn.Module, adapter_mixins.AdapterModuleMixin)
         vision_x = rearrange(vision_x, "b T F c h w -> (b T F) c h w")
         vision_x = vision_x.to(self.vision_encoder.dtype)
         with torch.no_grad():
+
             if self.from_hf:
                 vision_x = self.vision_encoder(vision_x, output_hidden_states=True)
                 vision_x = vision_x.hidden_states[self.vision_select_layer]
@@ -513,9 +514,11 @@ class NevaBaseModel:
                         param.requires_grad = False
                     vision_encoder = vision_encoder.eval()
             elif config.architectures[0] == "InternVisionModel":
+                vision_config =InternVisionConfig.from_pretrained(mm_cfg.vision_encoder.from_pretrained)
                 vision_encoder = InternVisionModel.from_pretrained(
                     mm_cfg.vision_encoder.from_pretrained,
                     torch_dtype=torch.bfloat16,
+                    config=vision_config
                 ).cuda()
                 vision_encoder = vision_encoder.to(torch.bfloat16)
                 if mm_cfg.vision_encoder.freeze:

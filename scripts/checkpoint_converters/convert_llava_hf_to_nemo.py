@@ -284,7 +284,7 @@ def get_args():
 
 def convert(args):
     logging.info(f"Loading checkpoint from HF Llava: `{args.input_name_or_path}`")
-    hf_tokenizer, hf_model, hf_image_processor, hf_context_len = load_pretrained_model("/raid/pgibbons/models/VILA1.5-40b", model_name="vial-v1.5-40b", model_base=None, load_8bit=False, load_4bit=False)
+    hf_tokenizer, hf_model, hf_image_processor, hf_context_len = load_pretrained_model("/raid/pgibbons/models/VILA1.5-40b", model_name="vial-v1.5-40b", model_base=None, load_8bit=False, load_4bit=False,device='cpu')
     logging.info("HF Model loading done.")
 
     nemo_config = OmegaConf.load(args.hparams_file)
