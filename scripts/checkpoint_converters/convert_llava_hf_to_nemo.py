@@ -38,38 +38,6 @@ from llava.model.language_model.builder import build_llm_and_tokenizer
 from llava.model.builder import load_pretrained_model
 
 import re
-def get_model_info(model, model_name):
-    info = []
-    layer_groups = defaultdict(list)
-
-    for name, param in model.named_parameters():
-        # Extract layer number and component
-        match = re.match(r'(.+\.layers\.)(\d+)(\..*)', name)
-        if match:
-            prefix, layer_num, suffix = match.groups()
-            layer_num = int(layer_num)
-            key = (prefix, suffix)
-            layer_groups[key].append(layer_num)
-        else:
-            info.append(f"{model_name}: {name} {param.shape}")
-
-    # Process grouped layers
-    for (prefix, suffix), layers in layer_groups.items():
-        if len(layers) > 2:
-            info.append(f"{model_name}: {prefix}[{min(layers)}-{max(layers)}]{suffix} {param.shape}")
-        else:
-            for layer in layers:
-                info.append(f"{model_name}: {prefix}{layer}{suffix} {param.shape}")
-
-    return sorted(info)
-
-def save_model_info(hf_info, nemo_info, output_file):
-    with open(output_file, 'w') as f:
-        f.write("HuggingFace Model:\n")
-        f.write("\n".join(hf_info))
-        f.write("\n\n============================================================\n\n")
-        f.write("Nemo Model:\n")
-        f.write("\n".join(nemo_info))
 
 
 
@@ -109,32 +77,28 @@ def create_rename_keys(num_hidden_layers):
     rename_keys = []
     for i in range(num_hidden_layers):
         rename_keys.extend([
-            (f"llm.model.layers.{i}.input_layernorm.weight", f"model.module.decoder.layers.{i}.self_attention.linear_qkv.layer_norm_weight"),
-            (f"llm.model.layers.{i}.mlp.down_proj.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc2.weight"),
-            (f"llm.model.layers.{i}.mlp.gate_proj.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc1_gate.weight"),
-            (f"llm.model.layers.{i}.mlp.up_proj.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc1_proj.weight"),
-            (f"llm.model.layers.{i}.post_attention_layernorm.weight", f"model.module.decoder.layers.{i}.mlp.linear_fc1.layer_norm_weight"),
-            (f"llm.model.layers.{i}.self_attn.o_proj.weight", f"model.module.decoder.layers.{i}.self_attention.linear_proj.weight"),
-            (f"llm.model.layers.{i}.self_attn.q_proj.weight", f"model.module.decoder.layers.{i}.self_attention.linear_q.weight"),
-            (f"llm.model.layers.{i}.self_attn.k_proj.weight", f"model.module.decoder.layers.{i}.self_attention.linear_k.weight"),
-            (f"llm.model.layers.{i}.self_attn.v_proj.weight", f"model.module.decoder.layers.{i}.self_attention.linear_v.weight"),
+            (f"llm.model.layers.{i}.input_layernorm.weight", f"model.decoder.layers.{i}.self_attention.linear_qkv.layer_norm_weight"),
+            (f"llm.model.layers.{i}.mlp.down_proj.weight", f"model.decoder.layers.{i}.mlp.linear_fc2.weight"),
+            (f"llm.model.layers.{i}.mlp.gate_proj.weight", f"model.decoder.layers.{i}.mlp.linear_fc1_gate.weight"),
+            (f"llm.model.layers.{i}.mlp.up_proj.weight", f"model.decoder.layers.{i}.mlp.linear_fc1_proj.weight"),
+            (f"llm.model.layers.{i}.post_attention_layernorm.weight", f"model.decoder.layers.{i}.mlp.linear_fc1.layer_norm_weight"),
+            (f"llm.model.layers.{i}.self_attn.o_proj.weight", f"model.decoder.layers.{i}.self_attention.linear_proj.weight"),
+            (f"llm.model.layers.{i}.self_attn.q_proj.weight", f"model.decoder.layers.{i}.self_attention.linear_q.weight"),
+            (f"llm.model.layers.{i}.self_attn.k_proj.weight", f"model.decoder.layers.{i}.self_attention.linear_k.weight"),
+            (f"llm.model.layers.{i}.self_attn.v_proj.weight", f"model.decoder.layers.{i}.self_attention.linear_v.weight"),
         ])
 
     # Non-layer dependent keys
     rename_keys.extend([
-        ("llm.lm_head.weight", "model.module.output_layer.weight"),
-        ("llm.model.embed_tokens.weight", "model.module.embedding.word_embeddings.weight"),
-        ("llm.model.norm.weight", "model.module.decoder.final_layernorm.weight"),
-        ("mm_projector.layers.0.bias","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.0.bias"),
-        ("mm_projector.layers.0.weight","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.0.weight"),
-        ("mm_projector.layers.1.bias","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.1.bias"),
-        ("mm_projector.layers.1.weight","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.1.weight"),
-        ("mm_projector.layers.2.bias","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.2.bias"),
-        ("mm_projector.layers.2.weight","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.2.weight"),
-        ("mm_projector.layers.3.bias","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.3.bias"),
-        ("mm_projector.layers.3.weight","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.3.weight"),
-        ("mm_projector.layers.4.bias","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.4.bias"),
-        ("mm_projector.layers.4.weight","model.module.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.4.weight"),
+        ("llm.lm_head.weight", "model.output_layer.weight"),
+        ("llm.model.embed_tokens.weight", "model.embedding.word_embeddings.weight"),
+        ("llm.model.norm.weight", "model.decoder.final_layernorm.weight"),
+        ("mm_projector.layers.1.bias","model.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.1.bias"),
+        ("mm_projector.layers.1.weight","model.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.1.weight"),
+        ("mm_projector.layers.2.bias","model.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.2.bias"),
+        ("mm_projector.layers.2.weight","model.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.2.weight"),
+        ("mm_projector.layers.4.bias","model.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.4.bias"),
+        ("mm_projector.layers.4.weight","model.embedding.word_embeddings.adapter_layer.mm_projector_adapter.mm_projector.4.weight"),
     ])
 
     return rename_keys
@@ -194,12 +158,12 @@ def adjust_tensor_shapes(model, nemo_state_dict):
         if 'vision_towel' in key_:
             del nemo_state_dict[key_]
 
-        #if 'word_embeddings.weight' in key_ or 'output_layer.weight' in key_:
-        #    # padding
-        #    loaded_weight = nemo_state_dict[key_]
-        #    new_weight = model.state_dict()[key_]
-        #    new_weight[: loaded_weight.shape[0], : loaded_weight.shape[1]] = loaded_weight
-        #    nemo_state_dict[key_] = new_weight
+        if 'word_embeddings.weight' in key_ or 'output_layer.weight' in key_:
+            # padding
+            loaded_weight = nemo_state_dict[key_]
+            new_weight = model.state_dict()[key_]
+            new_weight[: loaded_weight.shape[0], : loaded_weight.shape[1]] = loaded_weight
+            nemo_state_dict[key_] = new_weight
 
         if 'mlp.linear_fc1_gate.weight' in key_:
             key_gate = key_
@@ -284,29 +248,29 @@ def get_args():
 
 def convert(args):
     logging.info(f"Loading checkpoint from HF Llava: `{args.input_name_or_path}`")
-    hf_tokenizer, hf_model, hf_image_processor, hf_context_len = load_pretrained_model("/raid/pgibbons/models/VILA1.5-40b", model_name="vial-v1.5-40b", model_base=None, load_8bit=False, load_4bit=False,device='cpu')
+    hf_tokenizer, hf_model, hf_image_processor, hf_context_len = load_pretrained_model("/raid/pgibbons/models/VILA1.5-40b", model_name="vila-v1.5-40b", model_base=None, load_8bit=False, load_4bit=False,device='cpu')
     logging.info("HF Model loading done.")
 
     nemo_config = OmegaConf.load(args.hparams_file)
     nemo_config.model = adjust_nemo_config(nemo_config.model, hf_model.config)
     nemo_config.model.data["conv_template"] = args.conv_template
     nemo_config.model.mm_cfg.llm["model_type"] = args.conv_template
-    nemo_config.model.tokenizer["model"] = args.tokenizer_path
+    nemo_config.model.tokenizer["library"] = 'huggingface'
+    nemo_config.model.tokenizer['type'] = '01-ai/Yi-34b'
 
     nemo_config.trainer["precision"] = args.precision
     trainer = MegatronTrainerBuilder(nemo_config).create_trainer()
     model = MegatronNevaModel(nemo_config.model, trainer)
     print("getting model info")
-    hf_info = get_model_info(hf_model, "HF")
-    nemo_info = get_model_info(model, "NeMo")
-    print("saving model info")
-    save_model_info(hf_info, nemo_info, "/raid/pgibbons/models/model_info.txt")
+  
     rename_keys = create_rename_keys(nemo_config.model.num_layers)
     old_state_dict = hf_model.state_dict()
     new_state_dict = rename_model_keys(model_state_dict=old_state_dict, rename_keys=rename_keys)
 
     nemo_state_dict = adjust_tensor_shapes(model, new_state_dict)
     model.load_state_dict(nemo_state_dict, strict=False)
+    
+ 
 
     logging.info(f'=' * 100)
     if not args.skip_verification:

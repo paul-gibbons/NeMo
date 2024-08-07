@@ -68,8 +68,8 @@ model:
   mm_cfg:
     llm:
       from_pretrained: null # path to nemo checkpoint
-      freeze: False
-      model_type: llama_2 # Only support nvgpt or llama_2
+      freeze: True
+      model_type: yi_34b # Only support nvgpt or llama_2
     vision_encoder:
       model_type: "intern"
       from_pretrained: /raid/pgibbons/models/VILA1.5-40b/vision_tower # path or name
@@ -79,7 +79,7 @@ model:
       hidden_size: 3200 # could be found from model but tricky in code
       vision_select_layer: -1   # default to the last layer
       class_token_length: 1
-      freeze: False
+      freeze: True
     pretrain_mm_mlp_adapter: null # path to pretrained mm adapter
     mm_mlp_adapter_type: mlp_downsample
     use_im_start_end: False
@@ -105,7 +105,7 @@ model:
   kv_channels: null # Projection weights dimension in multi-head attention. Set to hidden_size // num_attention_heads if null
   apply_query_key_layer_scaling: True # scale Q * K^T by 1 / layer-number.
   normalization: 'rmsnorm' # Normalization layer to use. Options are 'layernorm', 'rmsnorm'
-  layernorm_epsilon: 1e-5
+  layernorm_epsilon: 1e-6
   do_layer_norm_weight_decay: False # True means weight decay on all params
   make_vocab_size_divisible_by: 16 # Pad the vocab size to be divisible by this value for computation efficiency.
   pre_process: True # add embedding
@@ -191,7 +191,7 @@ model:
     media_type: image # currently supported: image
     sep_image_conv_front: False
     image_token_len: 1024
-    conv_template: llama_2 # check `nemo/collections/multimodal/data/neva/conversation.py`
+    conv_template: yi_34b # check `nemo/collections/multimodal/data/neva/conversation.py`
     image_folder: null
     image_aspect_ratio: 'square'
 
