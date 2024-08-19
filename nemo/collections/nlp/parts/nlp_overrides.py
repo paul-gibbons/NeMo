@@ -1005,6 +1005,10 @@ class NLPSaveRestoreConnector(SaveRestoreConnector):
             dir_name = os.path.dirname(save_path)
 
             # dist ckpt calls save on every rank
+
+            #SET DIST_CKPT TO FALSE HERE TO SAVE TO LEGACY FORMAT
+            dist_ckpt = True
+
             if dist_ckpt:
                 # model weights is a directory
                 dist_ckpt_dir = ckpt_to_dir(os.path.join(dir_name, self.model_weights_ckpt))

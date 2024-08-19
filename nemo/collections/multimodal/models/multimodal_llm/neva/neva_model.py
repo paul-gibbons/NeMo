@@ -24,7 +24,7 @@ from einops import rearrange, reduce, repeat
 from omegaconf.dictconfig import DictConfig
 from pkg_resources import packaging
 from pytorch_lightning.trainer.trainer import Trainer
-from transformers import CLIPVisionModel, SiglipVisionModel
+from transformers import CLIPVisionModel, SiglipVisionModel, AutoModel, AutoConfig
 
 from nemo.collections.common.parts.utils import extend_instance
 from nemo.collections.multimodal.data.neva.conversation import DEFAULT_IM_END_TOKEN, DEFAULT_IM_START_TOKEN
@@ -146,7 +146,7 @@ class NevaWordEmbeddingMixin(torch.nn.Module, adapter_mixins.AdapterModuleMixin)
         use_im_start_end=False,
     ):
         self.vision_encoder = vision_encoder
-        self.from_hf = isinstance(vision_encoder, CLIPVisionModel) or isinstance(vision_encoder, SiglipVisionModel) or isinstance(vision_encoder, InternVisionModel)
+        self.from_hf = isinstance(vision_encoder, CLIPVisionModel) or isinstance(vision_encoder, SiglipVisionModel) or isinstance(vision_encoder, InternVisionModel) or 'RADIOModel' in vision_encoder.config.architectures
         self.media_start_id = media_start_id
         self.media_end_id = media_end_id
         self.class_token_length = class_token_length
@@ -209,7 +209,8 @@ class NevaWordEmbeddingMixin(torch.nn.Module, adapter_mixins.AdapterModuleMixin)
         with torch.no_grad():
 
             if self.from_hf:
-                vision_x = self.vision_encoder(vision_x, output_hidden_states=True)
+                #vision_x = self.vision_encoder(vision_x,output_hidden_states=True)
+                vision_x = self.vision_encoder(vision_x)
                 vision_x = vision_x.hidden_states[self.vision_select_layer]
             else:
                 self.vision_encoder.backbone.transformer.return_select_layer = self.vision_select_layer
@@ -485,7 +486,7 @@ class NevaBaseModel:
         if mm_cfg.vision_encoder.get("from_hf", False):
             from transformers import AutoConfig
 
-            config = AutoConfig.from_pretrained(mm_cfg.vision_encoder.from_pretrained)
+            config = AutoConfig.from_pretrained(mm_cfg.vision_encoder.from_pretrained,trust_remote_code=True)
             if (
                 "clip" in mm_cfg.vision_encoder.from_pretrained
                 or "vit" in mm_cfg.vision_encoder.from_pretrained
@@ -525,8 +526,21 @@ class NevaBaseModel:
                     for param in vision_encoder.parameters():
                         param.requires_grad = False
                     vision_encoder = vision_encoder.eval()
+
+            elif config.architectures[0] == "RADIOModel":
+                vision_encoder = AutoModel.from_pretrained(
+                                mm_cfg.vision_encoder.from_pretrained,
+                                trust_remote_code=True,
+                                torch_dtype=torch.bfloat16,
+                                config=config
+                            ).cuda()
+                vision_encoder = vision_encoder.to(torch.bfloat16)
+                if mm_cfg.vision_encoder.freeze:
+                    for param in vision_encoder.parameters():
+                        param.requires_grad = False
+                    vision_encoder = vision_encoder.eval()
             else:
-                raise ValueError("Currently only support CLIPVisionModel, SigLipVisionModel, and InternVisionModel from Huggingface")
+                raise ValueError("Currently only support CLIPVisionModel, SigLipVisionModel, InternVisionModel, and C-RADIO from Huggingface")
         else:
             vision_cfg = MegatronCLIPModel.restore_from(
                 mm_cfg.vision_encoder.from_pretrained, return_config=True
@@ -1348,8 +1362,9 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         # TODO(yuya): maybe not hard-code vision_encoder keys here
         vision_encoder_keys = [k for k in self.base_keys if "vision_encoder" in k]
         llm_keys = [k for k in self.base_keys if "vision_encoder" not in k]
-        if not self.cfg.mm_cfg.llm.freeze:
-            keys_to_keep += llm_keys
+        #if not self.cfg.mm_cfg.llm.freeze:
+        #    keys_to_keep += llm_keys
+        keys_to_keep += llm_keys
         if not self.cfg.mm_cfg.vision_encoder.freeze:
             keys_to_keep += vision_encoder_keys
         return keys_to_keep
