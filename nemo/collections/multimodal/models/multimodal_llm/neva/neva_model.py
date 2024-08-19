@@ -146,7 +146,7 @@ class NevaWordEmbeddingMixin(torch.nn.Module, adapter_mixins.AdapterModuleMixin)
         use_im_start_end=False,
     ):
         self.vision_encoder = vision_encoder
-        self.from_hf = isinstance(vision_encoder, CLIPVisionModel) or isinstance(vision_encoder, SiglipVisionModel) or isinstance(vision_encoder, InternVisionModel) or 'RADIOModel' in vision_encoder.config.architectures
+        self.from_hf = isinstance(vision_encoder, CLIPVisionModel) or isinstance(vision_encoder, SiglipVisionModel) or isinstance(vision_encoder, InternVisionModel)
         self.media_start_id = media_start_id
         self.media_end_id = media_end_id
         self.class_token_length = class_token_length
@@ -209,8 +209,7 @@ class NevaWordEmbeddingMixin(torch.nn.Module, adapter_mixins.AdapterModuleMixin)
         with torch.no_grad():
 
             if self.from_hf:
-                #vision_x = self.vision_encoder(vision_x,output_hidden_states=True)
-                vision_x = self.vision_encoder(vision_x)
+                vision_x = self.vision_encoder(vision_x,output_hidden_states=True)
                 vision_x = vision_x.hidden_states[self.vision_select_layer]
             else:
                 self.vision_encoder.backbone.transformer.return_select_layer = self.vision_select_layer
@@ -526,21 +525,8 @@ class NevaBaseModel:
                     for param in vision_encoder.parameters():
                         param.requires_grad = False
                     vision_encoder = vision_encoder.eval()
-
-            elif config.architectures[0] == "RADIOModel":
-                vision_encoder = AutoModel.from_pretrained(
-                                mm_cfg.vision_encoder.from_pretrained,
-                                trust_remote_code=True,
-                                torch_dtype=torch.bfloat16,
-                                config=config
-                            ).cuda()
-                vision_encoder = vision_encoder.to(torch.bfloat16)
-                if mm_cfg.vision_encoder.freeze:
-                    for param in vision_encoder.parameters():
-                        param.requires_grad = False
-                    vision_encoder = vision_encoder.eval()
             else:
-                raise ValueError("Currently only support CLIPVisionModel, SigLipVisionModel, InternVisionModel, and C-RADIO from Huggingface")
+                raise ValueError("Currently only support CLIPVisionModel, SigLipVisionModel, InternVisionModel")
         else:
             vision_cfg = MegatronCLIPModel.restore_from(
                 mm_cfg.vision_encoder.from_pretrained, return_config=True

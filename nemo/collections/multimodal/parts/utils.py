@@ -559,17 +559,8 @@ def create_image_processor(mm_cfg):
         ):
             from llava.model.multimodal_encoder.intern_encoder import InternVisionPreprocessor
             image_processor = InternVisionPreprocessor()
-        elif "cradio" in mm_cfg.vision_encoder.from_pretrained.lower() or "cradio" in mm_cfg.vision_encoder.get(
-            "model_type", ""
-        ):
-            # Assuming CradioImageProcessor is the class for Cradio
-            image_processor = CLIPImageProcessor.from_pretrained(
-                mm_cfg.vision_encoder.from_pretrained, torch_dtype=torch.bfloat16
-            )
-            image_processor.do_resize = True
-            image_processor.do_center_crop = True
         else:
-            raise ValueError("Currently only support CLIPImageProcessor, SiglipImageProcessor, InternVisionPreprocessor, and CradioImageProcessor")
+            raise ValueError("Currently only support CLIPImageProcessor, SiglipImageProcessor, InternVisionPreprocessor")
         crop_size = mm_cfg.vision_encoder.get("crop_size")
         if hasattr(image_processor, 'crop_size') and crop_size is not None:
             assert crop_size == (
