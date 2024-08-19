@@ -349,8 +349,15 @@ def preprocess_multimodal(sources: dict, multimodal_cfg: dict, cur_token_len: in
         if use_plain:
             assert default_token in conversation[0]['value']
             conversation[0]['value'] = default_token
-        for turn in conversation:
-            turn["value"] = turn["value"].replace(default_token, replace_token)
+
+        if multimodal_cfg["conv_template"] == "interleaved":
+            # directly replace the default_token in the conversation,
+            # since we don't use the conversation template
+            updated_conversation = conversation.replace(default_token, replace_token)
+            source['conversations'] = updated_conversation
+        else:
+            for turn in conversation:
+                turn["value"] = turn["value"].replace(default_token, replace_token)
     return sources
 
 
@@ -1058,6 +1065,52 @@ def preprocess_plain(
         labels=labels,
     )
 
+def preprocess_interleaved_prompt(
+    sources: dict,
+    tokenizer,
+    cfg,
+) -> Dict:
+    
+    """tokenize the interleaved prompt and mask the text part of the prompt
+    """
+    conversations = []
+    for source in sources:
+        conversations.append(source['conversations'])
+    add_extra_token = cfg.get("add_extra_token")
+    tokens = tokenize(
+        texts=conversations,
+        tokenizer=tokenizer,
+        context_length=cfg.get("context_length"),
+        add_extra_token=add_extra_token,
+    )
+    
+    model_type = cfg['model_type']
+    image_patch_token = DEFAULT_IMAGE_PATCH_TOKEN[model_type]
+    image_start_token = DEFAULT_IM_START_TOKEN[model_type]
+    image_end_token = DEFAULT_IM_END_TOKEN[model_type]
+    DEFAULT_TOKENS = [image_patch_token, image_start_token, image_end_token, DEFAULT_PAD_TOKEN]
+    img_patch_id, img_start_id, img_end_id, pad_id = get_tokens_ids(tokenizer, DEFAULT_TOKENS)
+    tokens[tokens == img_patch_id] = 0  # DEFAULT_IMAGE_PATCH_TOKEN
+    
+    labels = tokens.clone().detach()
+
+    # Mask labels change for interleaved prompt
+    labels[labels == img_start_id] = IGNORE_INDEX
+    labels[labels == img_end_id] = IGNORE_INDEX
+    labels[labels == 0] = IGNORE_INDEX
+    labels[labels == pad_id] = IGNORE_INDEX
+    
+    if add_extra_token:
+        tokens = tokens[:, :-1].contiguous()
+        labels = labels[:, 1:].contiguous()
+    else:
+        labels = torch.roll(labels, shifts=-1, dims=-1)
+        labels[:, -1] = IGNORE_INDEX
+    
+    return dict(
+        tokens=tokens,
+        labels=labels,
+    )
 
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
