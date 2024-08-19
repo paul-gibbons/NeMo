@@ -9,6 +9,7 @@ from megatron.energon import Batch, CaptioningSample, DefaultTaskEncoder, OCRSam
 from transformers import CLIPImageProcessor, SiglipImageProcessor
 import re
 import numpy as np
+from PIL import Image
 from nemo.collections.common.tokenizers import SentencePieceTokenizer
 from nemo.collections.multimodal.data.neva.neva_dataset import (
     process_image,
@@ -262,7 +263,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         for item in sample.sequence:
             if isinstance(item, str):
                 interleaved_text.append(item)
-            elif isinstance(item, torch.Tensor):
+            elif isinstance(item, torch.Tensor) or isinstance(item, Image.Image):
                 interleaved_text.append(DEFAULT_IMAGE_TOKEN)
                 images.append(item)
             else:

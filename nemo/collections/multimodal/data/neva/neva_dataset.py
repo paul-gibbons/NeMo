@@ -36,6 +36,7 @@ from nemo.collections.multimodal.data.clip.augmentations.augmentations import im
 from nemo.collections.multimodal.data.neva.conversation import (
     DEFAULT_BOS_TOKEN,
     DEFAULT_EOS_TOKEN,
+    DEFAULT_PAD_TOKEN,
     DEFAULT_IM_END_TOKEN,
     DEFAULT_IM_START_TOKEN,
     DEFAULT_IMAGE_PATCH_TOKEN,
