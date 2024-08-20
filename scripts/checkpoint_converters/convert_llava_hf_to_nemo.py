@@ -159,10 +159,22 @@ def adjust_tensor_shapes(model, nemo_state_dict):
             del nemo_state_dict[key_]
 
         if 'word_embeddings.weight' in key_ or 'output_layer.weight' in key_:
-            # padding
             loaded_weight = nemo_state_dict[key_]
-            new_weight = model.state_dict()[key_]
-            new_weight[: loaded_weight.shape[0], : loaded_weight.shape[1]] = loaded_weight
+            vocab_size, hidden_size = loaded_weight.shape
+            
+            # Calculate the new vocab size divisible by 16
+            new_vocab_size = ((vocab_size + 15) // 16) * 16
+            
+            # Create a new padded weight tensor
+            new_weight = torch.zeros((new_vocab_size, hidden_size), dtype=loaded_weight.dtype, device=loaded_weight.device)
+            
+            # Copy the original weights
+            new_weight[:vocab_size, :] = loaded_weight
+            
+            print(f"Key: {key_}")
+            print(f"Loaded weight shape: {loaded_weight.shape}, New weight shape: {new_weight.shape}")
+            
+            # Update the state dict with the padded weights
             nemo_state_dict[key_] = new_weight
 
         if 'mlp.linear_fc1_gate.weight' in key_:
@@ -201,7 +213,7 @@ def adjust_tensor_shapes(model, nemo_state_dict):
 
 def adjust_nemo_config(model_config, ref_config):
     model_config.mm_cfg.mm_mlp_adapter_type = "mlp_downsample"
-    model_config.mm_cfg.vision_encoder.from_pretrained = "/raid/pgibbons/models/VILA1.5-40b/vision_tower"
+    model_config.mm_cfg.vision_encoder.from_pretrained = "/raid/pgibbons/models/Llama-3-VILA1.5-8B/vision_tower"
 
     model_config["encoder_seq_length"] = ref_config.llm_cfg["max_position_embeddings"]
     model_config["num_layers"] = ref_config.llm_cfg["num_hidden_layers"]
@@ -246,9 +258,21 @@ def get_args():
     return args
 
 
+def pad_vocab(weight, pad_to=8):
+    vocab_size, hidden_size = weight.shape
+    new_vocab_size = (vocab_size + pad_to - 1) // pad_to * pad_to
+    padding_size = new_vocab_size - vocab_size
+    
+    padded_weight = torch.zeros((new_vocab_size, hidden_size), dtype=weight.dtype, device=weight.device)
+    padded_weight[:vocab_size, :] = weight
+    
+    print(f"Loaded weight shape: {weight.shape}, Padded weight shape: {padded_weight.shape}, New weight shape: {padded_weight.shape}")
+    
+    return padded_weight
+
 def convert(args):
     logging.info(f"Loading checkpoint from HF Llava: `{args.input_name_or_path}`")
-    hf_tokenizer, hf_model, hf_image_processor, hf_context_len = load_pretrained_model("/raid/pgibbons/models/VILA1.5-40b", model_name="vila-v1.5-40b", model_base=None, load_8bit=False, load_4bit=False,device='cpu')
+    hf_tokenizer, hf_model, hf_image_processor, hf_context_len = load_pretrained_model("/raid/pgibbons/models/Llama-3-VILA1.5-8B/", model_name="vila-v1.5-8b", model_base=None, load_8bit=False, load_4bit=False,device='cpu')
     logging.info("HF Model loading done.")
 
     nemo_config = OmegaConf.load(args.hparams_file)
@@ -256,11 +280,13 @@ def convert(args):
     nemo_config.model.data["conv_template"] = args.conv_template
     nemo_config.model.mm_cfg.llm["model_type"] = args.conv_template
     nemo_config.model.tokenizer["library"] = 'huggingface'
-    nemo_config.model.tokenizer['type'] = '01-ai/Yi-34b'
+    nemo_config.model.tokenizer['type'] = 'meta-llama/Meta-Llama-3-8B'
 
     nemo_config.trainer["precision"] = args.precision
     trainer = MegatronTrainerBuilder(nemo_config).create_trainer()
     model = MegatronNevaModel(nemo_config.model, trainer)
+    if hf_tokenizer.pad_token:
+        model.tokenizer.pad_token = hf_tokenizer.pad_token
     print("getting model info")
   
     rename_keys = create_rename_keys(nemo_config.model.num_layers)
