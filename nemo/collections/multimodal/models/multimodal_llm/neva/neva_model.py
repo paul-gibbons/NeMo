@@ -66,7 +66,7 @@ from nemo.core import adapter_mixins
 from nemo.core.classes.common import PretrainedModelInfo
 from nemo.utils import logging
 
-from nemo.collections.multimodal.data.neva.neva_energon_dataset import TaskEncoder
+from nemo.collections.multimodal.data.neva.neva_energon_dataset import TaskEncoder, PackingTaskEncoder
 from megatron.energon import (
     LimitDataset,
     RepeatDataset,
@@ -75,6 +75,7 @@ from megatron.energon import (
     get_savable_loader,
     get_train_dataset,
     get_val_datasets,
+    get_val_dataset,
 )
 
 from llava.model.multimodal_encoder.intern_encoder import InternVisionTower
@@ -1426,6 +1427,14 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             shuffle_buffer_size=100,
             image_decode="pil",
             )
+        
+        # for sequence packing, could replace the TaskEncoder with below
+        #task_encoder=PackingTaskEncoder(
+#                  tokenizer=self.tokenizer,
+#                  image_processor=image_processor,
+#                  multimodal_cfg=multimodal_cfg,
+#                  data_cfg=data_cfg,
+#                  max_length=4096),
 
         val_datasets = get_val_datasets(
         dname,
@@ -1441,19 +1450,36 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         image_decode="pil",
             )
         
-        val_datasets_without_source_datasets = [
-            # Limit the dataset to eval_iters * num_microbatches
-            LimitDataset(
-                # Repeat the inner dataset in case it's too short
-                RepeatDataset(val_ds, worker_config=worker_config),
-                length=self.cfg.micro_batch_size*self.trainer.limit_val_batches,
-                worker_config=worker_config,
-                reset_after_epoch=True,
-            )
-            for val_ds, _src_ds in val_datasets
-            ]
+        # val_datasets_without_source_datasets = [
+        #     # Limit the dataset to eval_iters * num_microbatches
+        #     LimitDataset(
+        #         # Repeat the inner dataset in case it's too short
+        #         RepeatDataset(val_ds, worker_config=worker_config),
+        #         length=self.cfg.micro_batch_size*self.trainer.limit_val_batches,
+        #         worker_config=worker_config,
+        #         reset_after_epoch=True,
+        #     )
+        #     for val_ds, _src_ds in val_datasets
+        #     ]
+        
+        val_datasets = get_val_dataset(
+            dname,
+            split_part="val",
+            batch_size=micro_batch_size,
+            # This is the total number over all workers
+            # limit=args.eval_iters * get_num_microbatches(),
+            task_encoder=PackingTaskEncoder(
+                tokenizer=self.tokenizer,
+                image_processor=image_processor,
+                multimodal_cfg=multimodal_cfg,
+                data_cfg=data_cfg,
+                max_length=4096),
+            worker_config=worker_config,
+            image_decode="pil",
+             )
 
-        return train_dataset, val_datasets_without_source_datasets, None
+        #return train_dataset, val_datasets_without_source_datasets, None
+        return train_dataset, val_datasets, None
 
     #energon dataset builder
     def build_train_valid_test_datasets_energon(self):
@@ -1490,9 +1516,10 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             logging.info(f"Restored dataset state from {self.trainer.ckpt_path}")
 
         
-        valid_dataloader = [
-            get_loader(valid_ds, worker_config=worker_config) for valid_ds in valid_ds1
-        ]
+        # valid_dataloader = [
+        #     get_loader(valid_ds, worker_config=worker_config) for valid_ds in valid_ds1
+        # ]
+        valid_dataloader = get_loader(valid_ds1, worker_config=worker_config)
         self._train_dl = train_dataloader
         self._validation_dl = valid_dataloader
         return self._train_dl, self._validation_dl

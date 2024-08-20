@@ -4,7 +4,7 @@ from typing import Any, List, Dict, Optional, Tuple, Union
 import torch
 from einops import rearrange
 from megatron.energon import DefaultTaskEncoder, batch_list, batch_stack
-from megatron.energon import batch_pad_stack
+from megatron.energon import batch_pad_stack, stateless
 from megatron.energon import Batch, CaptioningSample, DefaultTaskEncoder, OCRSample, VQASample, SimilarityInterleavedSample, InterleavedSample
 from transformers import CLIPImageProcessor, SiglipImageProcessor
 import re
@@ -240,24 +240,6 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
     
     
     def encode_interleaved(self, sample: InterleavedSample) -> dict:
-        """this function is used to encode strictly interleaved samples
-        there are few cases where the image token is not interleaved with the text
-        in those cases, we need to remove the excess image tokens or pad the images correctly.
-
-        few edge cases: 
-        1) [DONE] when no image token is present in the text
-        2) [DONE] when first tokens are mostly image tokens, follow by text tokens only or text tokens/images interleaved, after truncation, there will be only images left.
-        3) [DONE verified that this won't happen] when last tokens are mostly image tokens, follow by text tokens only or text tokens/images interleaved (need to conisder what
-        happened after truncate the image tokens, as the image end id token will be truncated, causing assertion error)
-        4) [DONE] when image tokens are interleaved with text tokens, but the last token is image token, which might longer than the max_seq_len
-        5) [DONE] when image tokens are interleaved with text tokens, but the last token is text token, which might longer than the max_seq_len
-        6) [DONE we have padding machanism for this] when image tokens are interleaved with text tokens, but after removing the excess image tokens, there is only text tokens left
-        
-        Args:
-            sample (InterleavedSample): after preprocessed by Energon, the sample looks like this:
-        Returns:
-            dict: tokenized inputs, attention mask, loss mask, position ids
-        """
         interleaved_text = []
         images = []
         for item in sample.sequence:
@@ -315,7 +297,6 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         if images:
             processed_sample["image"] = self.pad_images(processed_sample["image"], self.max_num_images)
         else:
-            # add extra dummy images for edge case 1
             processed_sample["image"] = torch.zeros(self.max_num_images, 3, self.multimodal_cfg["crop_size"][0], self.multimodal_cfg["crop_size"][1])
         
         return ImageTaskSample(
@@ -331,8 +312,6 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         )
     
     def remove_excess_image_tokens(self, interleaved_text, max_num_images):
-        # implement a mechanism to remove excess image tokens
-        
         if interleaved_text[-1] == DEFAULT_IMAGE_TOKEN:
             interleaved_text = interleaved_text[:-1]
             
@@ -460,6 +439,64 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         labels[labels == -1] = 0
         
         return attention_mask, loss_mask, position_ids
+    
+    
+class PackingTaskEncoder(TaskEncoder):
+    def __init__(self, tokenizer, image_processor, multimodal_cfg: dict, data_cfg: dict, max_length: int):
+        super().__init__(tokenizer, image_processor, multimodal_cfg, data_cfg)
+        self.max_length = max_length
+        self.batch_type = ImageTaskBatch  
+
+    @stateless(restore_seeds=True)
+    def encode_sample(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample, SimilarityInterleavedSample]) -> dict:
+        return super().encode_sample(sample)
+
+    def slice_batch(self, samples: List[ImageTaskSample]) -> List[List[ImageTaskSample]]:
+        # Sort samples by token length
+        samples.sort(key=lambda x: len(x.tokens))       
+        batches = []
+        while len(samples) > 0:
+            batch = []
+            total_length = 0
+            while len(samples) > 0 and total_length + len(samples[0].tokens) <= self.max_length:
+                sample = samples.pop(0)
+                batch.append(sample)
+                total_length += len(sample.tokens)
+            batches.append(batch)
+        return batches
+    
+    def batch(self, samples: List[ImageTaskSample]) -> ImageTaskBatch:
+        tokens = torch.cat([s.tokens for s in samples])
+        labels = torch.cat([s.labels for s in samples])
+        
+        cu_seqlens = torch.cumsum(torch.tensor([0] + [len(s.tokens) for s in samples]), dim=0)
+        max_seqlen = cu_seqlens[-1]
+        
+        attention_mask = torch.ones(max_seqlen, max_seqlen, dtype=torch.bool)
+        loss_mask = torch.cat([s.loss_mask for s in samples])
+        position_ids = torch.arange(max_seqlen, dtype=torch.long)
+
+        media = torch.stack([s.image for s in samples if s.image is not None]) if self.multimodal_cfg['is_multimodal'] else None
+        
+        batch = ImageTaskBatch(
+            tokens=tokens.unsqueeze(0),
+            labels=labels.unsqueeze(0),
+            attention_mask=attention_mask.unsqueeze(0),
+            loss_mask=loss_mask.unsqueeze(0),
+            position_ids=position_ids.unsqueeze(0),
+            media=media
+        )
+        
+        if batch.media is not None:
+            if batch.media.shape[1] == 1:
+                batch.media = rearrange(batch.media, "b T c h w -> b T 1 c h w")
+            else:
+                batch.media = rearrange(batch.media, "b T c h w -> b T 1 c h w")
+        
+        return batch
+    
+    def encode_batch(self, batch: ImageTaskBatch) -> dict:
+        return super().encode_batch(batch)
 
 
 # Usage example:
