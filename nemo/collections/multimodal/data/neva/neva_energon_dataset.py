@@ -60,7 +60,12 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         self.conv_template = multimodal_cfg["conv_template"]
         self.max_num_images = 6
         self.image_following_text_only = False
-
+        self.caption_prompts = [
+            "Generate a short caption of the image.",
+            "Describe the image concisely.",
+            "Provide a brief description of the given image."
+        ]
+        self.prompt_index = 0
     
 
     def encode_sample(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample, SimilarityInterleavedSample]) -> dict:
@@ -68,12 +73,59 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             return self.encode_interleaved(sample)
         elif isinstance(sample, VQASample):
             return self.encode_pretrain(sample)
+        elif isinstance(sample, CaptioningSample):
+            return self.encode_captioning(sample)
         elif isinstance(sample, SimilarityInterleavedSample):
             return self.encode_similarity_interleaved(sample)
             #return self.encode_sft(sample)
         else:
             return self.encode_sft(sample)
 
+    
+    def encode_captioning(self, sample: CaptioningSample) -> dict:
+        processed_image = self.process_images(sample.image)
+        
+        prompt = f"<image>\n{self.caption_prompts[self.prompt_index]}\n"
+        self.prompt_index = (self.prompt_index + 1) % len(self.caption_prompts)
+        
+        caption = sample.caption.strip()
+        
+        conversation = [
+            {"from": "human", "value": prompt},
+            {"from": "gpt", "value": caption}
+        ]
+        
+        processed_sample = {
+            "conversations": conversation,
+            "image": processed_image
+        }
+        
+        if self.multimodal_cfg['is_multimodal']:
+            cur_token_len = self.calculate_token_length(processed_sample["image"])
+            processed_sample = preprocess_multimodal(
+                [processed_sample],
+                self.multimodal_cfg,
+                cur_token_len,
+                use_plain=(self.conv_template == "plain")
+            )[0]
+        
+        processed = self.preprocess_conversations([processed_sample])
+        tokens = processed["tokens"]
+        labels = processed["labels"]
+        attention_mask, loss_mask, position_ids = self.get_masks_and_position_ids(tokens, labels)
+        
+        return ImageTaskSample(
+            __key__=sample.__key__,
+            __subflavor__=sample.__subflavor__,
+            conversations=conversation,
+            image=processed_sample["image"],
+            tokens=tokens.squeeze(0),
+            labels=labels.squeeze(0),
+            attention_mask=attention_mask.squeeze(0),
+            loss_mask=loss_mask.squeeze(0),
+            position_ids=position_ids
+        )
+    
     def encode_pretrain(self, sample: VQASample) -> dict:
         conversations = [
             {"from": "human", "value": sample.context},

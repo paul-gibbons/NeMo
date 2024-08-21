@@ -206,13 +206,15 @@ model:
       train:
         datasets:
           - weight: 1.0
-            path: /raid/pgibbons/data/energon_datasets/energon_datasets/obelisc/stage4/no-partial
+            path: /raid/pgibbons/data/energon_datasets/captioning
+            #path: /raid/pgibbons/data/energon_datasets/energon_datasets/obelisc/stage4/no-partial
             #path: /raid/pgibbons/data/energon_datasets/LLaVA-Pretrain-LCS-558K     
       # For val and test, datasets will be concatenated
       val:
         datasets:
           - weight: 1.0
-            path: /raid/pgibbons/data/energon_datasets/energon_datasets/obelisc/stage4/no-partial
+            path: /raid/pgibbons/data/energon_datasets/captioning
+            #path: /raid/pgibbons/data/energon_datasets/energon_datasets/obelisc/stage4/no-partial
             #path: /raid/pgibbons/data/energon_datasets/LLaVA-Pretrain-LCS-558K   
       
   # Nsys profiling options
