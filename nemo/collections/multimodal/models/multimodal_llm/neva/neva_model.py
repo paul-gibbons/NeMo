@@ -1446,7 +1446,6 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             multimodal_cfg=multimodal_cfg,
             data_cfg=data_cfg),
         worker_config=worker_config,
-
         image_decode="pil",
             )
         
@@ -1488,11 +1487,14 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         data_parallel_group = parallel_state.get_data_parallel_group()
         worker_debug_path = None
         worker_log_level = 0
+        logging.info(
+                f" Multimodal  train dataloader initializing with  rank {rank} world_size {world_size} data_parallel_group {data_parallel_group} ****** "
+            )
 
         worker_config = WorkerConfig(
             rank=rank,
             world_size=world_size,
-            num_workers=0,
+            num_workers=1,
             data_parallel_group=data_parallel_group,
             worker_debug_path=worker_debug_path,
             worker_log_level=worker_log_level,
@@ -1503,12 +1505,18 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         # Restore energon train dataloader state if we are resuming training
         restore = os.path.exists(self.trainer.ckpt_path) if self.trainer.ckpt_path else False
         if restore:
+            replica_id = (
+                parallel_state.get_pipeline_model_parallel_rank(),
+                parallel_state.get_tensor_model_parallel_rank(),
+                parallel_state.get_context_parallel_rank()
+            )
             sharded_state_dict = {
                 'dataloader_state': ShardedObject(
                 data=None,
                 key='dataloader_state',
                 global_shape=[parallel_state.get_data_parallel_world_size()],
                 global_offset=[parallel_state.get_data_parallel_rank()],
+                replica_id=replica_id,
             )
             }
             state_dict = dist_checkpointing.load(sharded_state_dict, self.trainer.ckpt_path)
@@ -1601,6 +1609,46 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
                     parallel_state.set_virtual_pipeline_model_parallel_rank(i)
                     self.model[i].module.load_state_dict(checkpoint[f'model{i}'], strict=True)
                 parallel_state.set_virtual_pipeline_model_parallel_rank(0)
+                
+    def on_save_checkpoint(self, checkpoint) -> None:
+         """LightningModule hook:
+         https://pytorch-lightning.readthedocs.io/en/stable/common/lightning_module.html#on-save-checkpoint
+         """
+
+         #Neva supports Megatron Energon dataloader, this requires saving the dataloader state on each data parallel group
+         def should_save_dataloader_state():
+            if self._train_dl is None:
+                return False
+            if not hasattr(self._train_dl, "save_state"):
+                return False
+            first_rank = parallel_state.is_pipeline_first_stage(ignore_virtual=True) and parallel_state.get_tensor_model_parallel_rank() == 0
+            return first_rank
+
+         def save_dataloader_state():
+            train_dataloader_state_dict = self._train_dl.save_state_rank()
+            checkpoint['dataloader_state'] = ShardedObject(
+                data=train_dataloader_state_dict,
+                key='dataloader_state',
+                global_shape=[parallel_state.get_data_parallel_world_size()],
+                global_offset=[parallel_state.get_data_parallel_rank()],
+            )
+
+         # Save energon train dataloader state if conditions are met
+         if self.cfg.get('energon', False) and should_save_dataloader_state():
+            save_dataloader_state()
+         
+        # mcore uses distributed checkpointing
+         # FSDP supports the lagecy checkpointing or torch-FSDP-native sharded checkpointing
+         if self.mcore_gpt and not self.use_fsdp:
+             checkpoint['sharded_state_dict'] = self.sharded_state_dict()
+
+         # legacy checkpointing for interleaved
+         else:
+             if isinstance(self.model, list):
+                 for i in range(len(self.model)):
+                     parallel_state.set_virtual_pipeline_model_parallel_rank(i)
+                     checkpoint[f'model{i}'] = self.model[i].module.state_dict_for_save_checkpoint()
+                 parallel_state.set_virtual_pipeline_model_parallel_rank(0)
 
     def sharded_state_dict(self, prefix: str = ''):
         if self.use_peft:
