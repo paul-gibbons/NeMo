@@ -213,7 +213,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         
         # 4 fields: sample.images, sample.texts, sample.similarity_matrix, sample.matched_text_index
         images, sentence_ixs = [], []
-        for sample_image, sim_vec in zip(sample.images, sample.matched_text_index):
+        for sample_image, sim_vec in zip(sample.images, sample.matched_text_indices):
             images.append(sample_image)
             sentence_ixs.append(sim_vec)
             

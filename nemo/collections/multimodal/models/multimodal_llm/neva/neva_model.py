@@ -1549,9 +1549,8 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         # TODO(yuya): maybe not hard-code vision_encoder keys here
         vision_encoder_keys = [k for k in self.base_keys if "vision_encoder" in k]
         llm_keys = [k for k in self.base_keys if "vision_encoder" not in k]
-        #if not self.cfg.mm_cfg.llm.freeze:
-        #    keys_to_keep += llm_keys
-        keys_to_keep += llm_keys
+        if not self.cfg.mm_cfg.llm.freeze:
+            keys_to_keep += llm_keys
         if not self.cfg.mm_cfg.vision_encoder.freeze:
             keys_to_keep += vision_encoder_keys
         return keys_to_keep
