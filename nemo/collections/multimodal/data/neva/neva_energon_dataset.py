@@ -61,7 +61,7 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
         self.max_num_images = 6
         self.image_following_text_only = False
         self.caption_prompts = [
-            "Generate a short caption of the image.",
+            "Generate a short cap fotion of the image.",
             "Describe the image concisely.",
             "Provide a brief description of the given image."
         ]
@@ -75,9 +75,8 @@ class TaskEncoder(DefaultTaskEncoder[VQASample, InterleavedSample, ImageTaskBatc
             return self.encode_pretrain(sample)
         elif isinstance(sample, CaptioningSample):
             return self.encode_captioning(sample)
-        elif isinstance(sample, SimilarityInterleavedSample):
+        elif isinstance(sample, SimilarityInterleavedSample) and self.conv_template == "interleaved":
             return self.encode_similarity_interleaved(sample)
-            #return self.encode_sft(sample)
         else:
             return self.encode_sft(sample)
 

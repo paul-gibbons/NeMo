@@ -213,7 +213,7 @@ def adjust_tensor_shapes(model, nemo_state_dict):
 
 def adjust_nemo_config(model_config, ref_config):
     model_config.mm_cfg.mm_mlp_adapter_type = "mlp_downsample"
-    model_config.mm_cfg.vision_encoder.from_pretrained = "/raid/pgibbons/models/Llama-3-VILA1.5-8B/vision_tower"
+    model_config.mm_cfg.vision_encoder.from_pretrained = "/raid/pgibbons/models/yi_34b_siglip_commercial/vision_tower"
 
     model_config["encoder_seq_length"] = ref_config.llm_cfg["max_position_embeddings"]
     model_config["num_layers"] = ref_config.llm_cfg["num_hidden_layers"]
@@ -272,7 +272,7 @@ def pad_vocab(weight, pad_to=8):
 
 def convert(args):
     logging.info(f"Loading checkpoint from HF Llava: `{args.input_name_or_path}`")
-    hf_tokenizer, hf_model, hf_image_processor, hf_context_len = load_pretrained_model("/raid/pgibbons/models/Llama-3-VILA1.5-8B/", model_name="vila-v1.5-8b", model_base=None, load_8bit=False, load_4bit=False,device='cpu')
+    hf_tokenizer, hf_model, hf_image_processor, hf_context_len = load_pretrained_model("/raid/pgibbons/models/yi_34b_siglip_commercial/", model_name="vila-v1.5-34b", model_base=None, load_8bit=False, load_4bit=False,device='cpu')
     logging.info("HF Model loading done.")
 
     nemo_config = OmegaConf.load(args.hparams_file)
@@ -280,7 +280,7 @@ def convert(args):
     nemo_config.model.data["conv_template"] = args.conv_template
     nemo_config.model.mm_cfg.llm["model_type"] = args.conv_template
     nemo_config.model.tokenizer["library"] = 'huggingface'
-    nemo_config.model.tokenizer['type'] = 'meta-llama/Meta-Llama-3-8B'
+    nemo_config.model.tokenizer['type'] = '01-ai/Yi-34b'
 
     nemo_config.trainer["precision"] = args.precision
     trainer = MegatronTrainerBuilder(nemo_config).create_trainer()

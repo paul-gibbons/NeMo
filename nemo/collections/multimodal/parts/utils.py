@@ -39,7 +39,7 @@ from llava.model.multimodal_encoder.intern.modeling_intern_vit import InternVisi
 
 try:
     from megatron.core import dist_checkpointing
-
+    
     HAVE_MEGATRON_CORE = True
 
 except (ImportError, ModuleNotFoundError):
@@ -149,6 +149,7 @@ def load_nemo_model_weights(nemo_path, sharded_state_dict=None):
                 checkpoint = dist_checkpointing.load(
                     sharded_state_dict=checkpoint,
                     checkpoint_dir=tmp_model_weights_dir,
+                    strict=dist_checkpointing.validation.StrictHandling.LOG_UNEXPECTED,
                 )
                 state_dict = checkpoint["state_dict"]
 
