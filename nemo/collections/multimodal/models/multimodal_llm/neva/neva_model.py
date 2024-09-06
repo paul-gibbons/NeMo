@@ -166,13 +166,15 @@ class NevaWordEmbeddingMixin(torch.nn.Module, adapter_mixins.AdapterModuleMixin)
         vision_encoder,
         media_start_id,
         media_end_id,
+        freeze,
         vision_select_layer=-1,
         vision_select_feature="patch",
         class_token_length=1,
-        use_im_start_end=False,
+        use_im_start_end=False
     ):
         self.vision_encoder = vision_encoder
         self.from_hf = isinstance(vision_encoder, CLIPVisionModel) or isinstance(vision_encoder, SiglipVisionModel)
+        self.freeze = freeze
         self.media_start_id = media_start_id
         self.media_end_id = media_end_id
         self.class_token_length = class_token_length
@@ -232,13 +234,18 @@ class NevaWordEmbeddingMixin(torch.nn.Module, adapter_mixins.AdapterModuleMixin)
 
         vision_x = rearrange(vision_x, "b T F c h w -> (b T F) c h w")
         vision_x = vision_x.to(self.vision_encoder.dtype)
-        with torch.no_grad():
+        def process_vision_input(self, vision_x):
             if self.from_hf:
                 vision_x = self.vision_encoder(vision_x, output_hidden_states=True)
-                vision_x = vision_x.hidden_states[self.vision_select_layer]
+                return vision_x.hidden_states[self.vision_select_layer]
             else:
                 self.vision_encoder.backbone.transformer.return_select_layer = self.vision_select_layer
-                vision_x = self.vision_encoder(vision_x)
+                return self.vision_encoder(vision_x)
+        if self.freeze:
+            with torch.no_grad():
+                vision_x = process_vision_input(self,vision_x)
+        else:
+            vision_x = process_vision_input(self,vision_x)
         vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
         if self.vision_select_feature == "patch":
             vision_x = vision_x[:, :, :, self.class_token_length :]
@@ -501,6 +508,7 @@ class NevaBaseModel:
                 media_end_id,
                 vision_select_layer=mm_cfg.vision_encoder.get("vision_select_layer", -2),
                 vision_select_feature=mm_cfg.vision_encoder.get("vision_select_feature", "patch"),
+                freeze=mm_cfg.vision_encoder.get("freeze", True),
                 class_token_length=mm_cfg.vision_encoder.get("class_token_length", 1),
                 use_im_start_end=mm_cfg.get("use_im_start_end", False),
             )
@@ -740,7 +748,17 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
                 adapter_cfg,
                 autocast_dtype=self.autocast_dtype if self.megatron_amp_O2 else None,
             )
-        self.adapter_keys = self._get_all_keys() - self.base_keys
+        all_keys = self._get_all_keys()
+    
+        if not self.cfg.mm_cfg.vision_encoder.freeze:
+            # If vision encoder is not frozen, keep vision_encoder keys
+            vision_encoder_keys = {key for key in all_keys if 'vision_encoder' in key}
+            non_vision_encoder_base_keys = self.base_keys - vision_encoder_keys
+            self.adapter_keys = all_keys - non_vision_encoder_base_keys
+        else:
+            # If vision encoder is frozen, proceed as before
+            self.adapter_keys = all_keys - self.base_keys
+            
         if self.megatron_amp_O2:
             self.adapter_keys = set(key.replace("model.module.", "model.", 1) for key in self.adapter_keys)
 
@@ -888,7 +906,7 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             group1_params, group2_params = [], []
             for param in self._optimizer_param_groups[0]['params']:
                 param_name = param_to_name.get(param)
-                if 'mm_projector' in param_name:
+                if 'mm_projector' in param_name or 'vision_encoder' in param_name:
                     group2_params.append(param)
                 else:
                     group1_params.append(param)

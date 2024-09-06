@@ -309,7 +309,7 @@ class NLPAdapterModelMixin:
         and/or prompt table will use the learning rate set by the user.
         """
         if self.use_peft:
-            self.freeze(training=True)  # Freeze the entire model
+            #self.freeze(training=True)  # Freeze the entire model
             if not self.ptuning_only_and_non_first_stage:
                 opt_params = []
                 for _, module in self._unwrap_model().named_modules(prefix="model"):

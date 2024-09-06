@@ -74,7 +74,17 @@ class MultimodalAdapterModelMixin(NLPAdapterModelMixin):
             self._check_and_add_peft_cfg(peft_cfg)
 
         logging.info(f"After adding PEFT params:\n{self.summarize()}")
-        self.adapter_keys = self._get_all_keys() - self.base_keys
+        
+        all_keys = self._get_all_keys()
+    
+        if not self.cfg.mm_cfg.vision_encoder.freeze:
+            # If vision encoder is not frozen, keep vision_encoder keys
+            vision_encoder_keys = {key for key in all_keys if 'vision_encoder' in key}
+            non_vision_encoder_base_keys = self.base_keys - vision_encoder_keys
+            self.adapter_keys = all_keys - non_vision_encoder_base_keys
+        else:
+            # If vision encoder is frozen, proceed as before
+            self.adapter_keys = all_keys - self.base_keys
         self.tunable_base_param_keys = set()
 
         for cfg in peft_cfgs:
