@@ -34,6 +34,9 @@ DEFAULT_IMAGE_PATCH_TOKEN["llama_3"] = "<|reserved_special_token_3|>"
 DEFAULT_IM_START_TOKEN["llama_3"] = "<|reserved_special_token_4|>"
 DEFAULT_IM_END_TOKEN["llama_3"] = "<|reserved_special_token_5|>"
 
+DEFAULT_IMAGE_PATCH_TOKEN["yi_34b"] = "<|unused000|>"
+DEFAULT_IM_START_TOKEN["yi_34b"] = "<|unused001|>"
+DEFAULT_IM_END_TOKEN["yi_34b"] = "<|unused002|>"
 
 DEFAULT_VID_START_TOKEN = "<extra_id_8>"
 DEFAULT_VID_END_TOKEN = "<extra_id_9>"
@@ -349,7 +352,7 @@ conv_nv_dpo = Conversation(
 )
 
 conv_yi_34b = Conversation(
-    system="",
+    system="Answer the questions.",
     roles=('user', 'assistant'),
     version="1.5",
     messages=(),
