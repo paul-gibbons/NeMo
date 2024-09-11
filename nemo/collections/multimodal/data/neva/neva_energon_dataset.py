@@ -5,7 +5,7 @@ import torch
 from einops import rearrange
 from megatron.energon import DefaultTaskEncoder, batch_list, batch_stack
 from megatron.energon import batch_pad_stack, stateless
-from megatron.energon import Batch, CaptioningSample, DefaultTaskEncoder, OCRSample, VQASample, SimilarityInterleavedSample, InterleavedSample
+from megatron.energon import Batch, CaptioningSample, DefaultTaskEncoder, OCRSample, VQASample, SimilarityInterleavedSample, InterleavedSample, Sample
 from transformers import CLIPImageProcessor, SiglipImageProcessor
 import re
 import numpy as np
@@ -26,7 +26,7 @@ from nemo.collections.multimodal.data.neva.neva_dataset import (
 )
 
 @dataclass
-class ImageTaskSample:
+class ImageTaskSample(Sample):
     __key__: str
     __subflavor__: str
     conversations: List[dict]
@@ -38,6 +38,17 @@ class ImageTaskSample:
     attention_mask: Optional[torch.Tensor] = None
     loss_mask: Optional[torch.Tensor] = None
     position_ids: Optional[torch.Tensor] = None
+
+@dataclass
+class ImageTaskBatchSample(Sample):
+    """One sample in a batch."""
+
+    tokens: torch.Tensor
+    labels: torch.Tensor
+    attention_mask: torch.Tensor
+    loss_mask: torch.Tensor
+    position_ids: torch.Tensor
+    media: Optional[torch.Tensor] = None
 
 @dataclass
 class ImageTaskBatch(Batch):
@@ -502,7 +513,7 @@ class PackingTaskEncoder(TaskEncoder):
     def encode_sample(self, sample: Union[ImageTaskSample, VQASample, InterleavedSample, SimilarityInterleavedSample]) -> dict:
         return super().encode_sample(sample)
 
-    def slice_batch(self, samples: List[ImageTaskSample]) -> List[List[ImageTaskSample]]:
+    def pre_pack(self, samples: List[ImageTaskSample]) -> List[List[ImageTaskSample]]:
         # Sort samples by token length
         samples.sort(key=lambda x: len(x.tokens))       
         batches = []
@@ -516,7 +527,7 @@ class PackingTaskEncoder(TaskEncoder):
             batches.append(batch)
         return batches
     
-    def batch(self, samples: List[ImageTaskSample]) -> ImageTaskBatch:
+    def final_pack(self, samples: List[ImageTaskSample]) -> ImageTaskBatchSample:
         tokens = torch.cat([s.tokens for s in samples])
         labels = torch.cat([s.labels for s in samples])
         
@@ -529,22 +540,23 @@ class PackingTaskEncoder(TaskEncoder):
 
         media = torch.stack([s.image for s in samples if s.image is not None]) if self.multimodal_cfg['is_multimodal'] else None
         
-        batch = ImageTaskBatch(
-            tokens=tokens.unsqueeze(0),
-            labels=labels.unsqueeze(0),
-            attention_mask=attention_mask.unsqueeze(0),
-            loss_mask=loss_mask.unsqueeze(0),
-            position_ids=position_ids.unsqueeze(0),
+        result = ImageTaskBatchSample(
+            __key__=samples[0].__key__,
+            tokens=tokens,
+            labels=labels,
+            attention_mask=attention_mask,
+            loss_mask=loss_mask,
+            position_ids=position_ids,
             media=media
         )
-        
-        if batch.media is not None:
-            if batch.media.shape[1] == 1:
-                batch.media = rearrange(batch.media, "b T c h w -> b T 1 c h w")
+
+        if result.media is not None:
+            if result.media.shape[1] == 1:
+                result.media = rearrange(result.media, "b T c h w -> b T 1 c h w")
             else:
-                batch.media = rearrange(batch.media, "b T c h w -> b T 1 c h w")
+                result.media = rearrange(result.media, "b T c h w -> b T 1 c h w")
         
-        return batch
+        return result
     
     def encode_batch(self, batch: ImageTaskBatch) -> dict:
         return super().encode_batch(batch)

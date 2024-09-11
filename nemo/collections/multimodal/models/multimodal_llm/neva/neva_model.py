@@ -1428,13 +1428,23 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             image_decode="pil",
             )
         
-        # for sequence packing, could replace the TaskEncoder with below
-        #task_encoder=PackingTaskEncoder(
-#                  tokenizer=self.tokenizer,
-#                  image_processor=image_processor,
-#                  multimodal_cfg=multimodal_cfg,
-#                  data_cfg=data_cfg,
-#                  max_length=4096),
+        # For sequence packing:
+        # train_dataset = get_train_dataset(
+        #     dname,
+        #     batch_size=micro_batch_size,
+        #     task_encoder=TaskEncoder(
+        #         tokenizer=self.tokenizer,
+        #         image_processor=image_processor,
+        #         multimodal_cfg=multimodal_cfg,
+        #         data_cfg=data_cfg,
+        #         max_length=4096),
+        #     packing_buffer_size=512,
+        #     worker_config=worker_config,
+        #     virtual_epoch_length=1000,
+        #     max_samples_per_sequence=100,
+        #     shuffle_buffer_size=100,
+        #     image_decode="pil",
+        #     )
 
         val_datasets = get_val_datasets(
         dname,
