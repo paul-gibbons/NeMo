@@ -527,6 +527,7 @@ class PackingTaskEncoder(TaskEncoder):
             batches.append(batch)
         return batches
     
+    @stateless
     def final_pack(self, samples: List[ImageTaskSample]) -> ImageTaskBatchSample:
         tokens = torch.cat([s.tokens for s in samples])
         labels = torch.cat([s.labels for s in samples])
