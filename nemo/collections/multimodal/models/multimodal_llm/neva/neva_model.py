@@ -906,7 +906,9 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             group1_params, group2_params = [], []
             for param in self._optimizer_param_groups[0]['params']:
                 param_name = param_to_name.get(param)
-                if 'mm_projector' in param_name or 'vision_encoder' in param_name:
+                if 'vision_encoder' in param_name and not self.cfg.mm_cfg.vision_encoder.freeze:
+                    group2_params.append(param)
+                elif 'mm_projector' in param_name:
                     group2_params.append(param)
                 else:
                     group1_params.append(param)
