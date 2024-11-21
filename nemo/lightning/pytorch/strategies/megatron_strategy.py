@@ -518,7 +518,8 @@ class MegatronStrategy(DDPStrategy, io.IOMixin):
                 opt.zero_grad()
 
             out = self.model.training_step(dataloader_iter, *args, **kwargs)
-
+            per_modality_loss = self.model.training_step(dataloader_iter, *args, **kwargs)
+            out = out['total_loss']
             if torch.is_tensor(out):
                 reduced_train_loss = out
             else:
@@ -565,6 +566,17 @@ class MegatronStrategy(DDPStrategy, io.IOMixin):
                 self.lightning_module.log(
                     "reduced_train_loss", reduced_train_loss, prog_bar=True, batch_size=1, sync_dist=False
                 )
+                if isinstance(per_modality_loss, dict):
+                    if 'text_loss' in per_modality_loss:
+                        self.lightning_module.log(
+                            "text_loss", per_modality_loss['text_loss'], 
+                            prog_bar=True, batch_size=1, sync_dist=False
+                        )
+                    if 'image_loss' in per_modality_loss:
+                        self.lightning_module.log(
+                            "image_loss", per_modality_loss['image_loss'], 
+                            prog_bar=True, batch_size=1, sync_dist=False
+                        )
                 # Log any MoE losses.
                 # TODO(@akoumparouli): loss_scale depends on the GBS.
                 for loss_name, loss_value in aggregate_moe_loss_stats(loss_scale=1.0).items():
@@ -609,14 +621,14 @@ class MegatronStrategy(DDPStrategy, io.IOMixin):
                 # groups (due to sync_dist), which divides val_loss by pp_size. so we multiply by pp_size to cancel out
                 self.lightning_module.log(
                     "val_loss",
-                    out * pp_size,
+                    out['total_loss'] * pp_size,
                     prog_bar=True,
                     sync_dist=True,
                     sync_dist_group=parallel_state.get_pipeline_model_parallel_group(),
                     on_epoch=True,
                 )
             else:
-                self.lightning_module.log("val_loss", out, prog_bar=True, on_epoch=True)
+                self.lightning_module.log("val_loss", out['total_loss'], prog_bar=True, on_epoch=True)
 
             return out
 

@@ -1598,77 +1598,132 @@ def _make_data_iterator_list(model, data_iterator: Iterator) -> List[Iterator]:
 
 
 class MaskedTokenLossReduction(MegatronLossReduction):
-    def __init__(self, validation_step: bool = False, val_drop_last: bool = True) -> None:
+    def __init__(self, modality_ranges: Dict[str, Tuple[int, int]], validation_step: bool = False, val_drop_last: bool = True) -> None:
         super().__init__()
+        self.modality_ranges = modality_ranges
         self.validation_step = validation_step
         self.val_drop_last = val_drop_last
 
     def forward(
-        self, batch: Dict[str, torch.Tensor], forward_out: torch.Tensor
+        self, 
+        batch: Dict[str, torch.Tensor], 
+        forward_out: torch.Tensor
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        """Taken from:
-        https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/nlp/models/language_modeling/megatron_gpt_model.py#L951-L976 .
-        """
         from megatron.core import parallel_state
-
         from nemo.collections.nlp.modules.common.megatron.utils import average_losses_across_data_parallel_group
 
-        # neva returns (logits, loss_mask)
+        # Handle tuple output case (e.g. NEVA model)
         if isinstance(forward_out, tuple):
             forward_out, loss_mask = forward_out
             batch["loss_mask"] = loss_mask
+
         cp_size = parallel_state.get_context_parallel_world_size()
+
+        # Calculate total loss like parent class
         if cp_size == 1:
-            loss_for_ub = masked_token_loss(forward_out, batch["loss_mask"])
+            total_loss = masked_token_loss(forward_out, batch["loss_mask"])
         else:
-            loss_for_ub = masked_token_loss_context_parallel(
-                forward_out, batch["loss_mask"], batch['num_valid_tokens_in_ub']
+            total_loss = masked_token_loss_context_parallel(
+                forward_out, 
+                batch["loss_mask"],
+                batch['num_valid_tokens_in_ub']
             )
 
-        if self.validation_step and not self.val_drop_last:
-            num_valid_tokens_in_ub = batch["loss_mask"].sum()
-            if loss_for_ub.isnan():
-                assert batch["loss_mask"].count_nonzero() == 0, "Got NaN loss with non-empty input"
-                loss_sum_for_ub = torch.zeros_like(num_valid_tokens_in_ub)
+        # Calculate per-modality losses
+        modality_losses = {}
+        tokens = batch["tokens"]
+        
+        for modality, (start_idx, end_idx) in self.modality_ranges.items():
+            # Create mask for tokens in this modality's range
+            modality_mask = (tokens >= start_idx) & (tokens < end_idx)
+            
+            # Combine with original loss mask
+            combined_mask = batch["loss_mask"] * modality_mask
+            
+            if cp_size == 1:
+                modality_loss = masked_token_loss(forward_out, combined_mask)
             else:
-                loss_sum_for_ub = num_valid_tokens_in_ub * loss_for_ub
+                # For context parallel, we need valid token count for this modality
+                num_valid_modal = combined_mask.sum()
+                modality_loss = masked_token_loss_context_parallel(
+                    forward_out,
+                    combined_mask, 
+                    num_valid_modal
+                )
+            
+            modality_losses[f"{modality}_loss"] = modality_loss * cp_size
 
-            loss_sum_and_ub_size_all_gpu = torch.cat(
-                [
-                    loss_sum_for_ub.clone().detach().view(1),
-                    torch.tensor([num_valid_tokens_in_ub], device=torch.cuda.current_device()).clone().detach(),
-                ]
+        # Handle validation step case
+        if self.validation_step and not self.val_drop_last:
+            num_valid_tokens = batch["loss_mask"].sum()
+            if total_loss.isnan():
+                assert batch["loss_mask"].count_nonzero() == 0
+                loss_sum = torch.zeros_like(num_valid_tokens)
+            else:
+                loss_sum = num_valid_tokens * total_loss
+
+            loss_sum_and_size = torch.cat([
+                loss_sum.clone().detach().view(1),
+                torch.tensor([num_valid_tokens], device=torch.cuda.current_device()).clone().detach()
+            ])
+            
+            torch.distributed.all_reduce(
+                loss_sum_and_size, 
+                group=parallel_state.get_data_parallel_group()
             )
-            torch.distributed.all_reduce(loss_sum_and_ub_size_all_gpu, group=parallel_state.get_data_parallel_group())
-            return loss_for_ub * cp_size, {"loss_sum_and_ub_size": loss_sum_and_ub_size_all_gpu}
+            
+            return total_loss * cp_size, {
+                "loss_sum_and_ub_size": loss_sum_and_size,
+                **modality_losses
+            }
 
-        reduced_loss = average_losses_across_data_parallel_group([loss_for_ub])
-        return loss_for_ub * cp_size, {"avg": reduced_loss}
+        # Regular training/inference case
+        reduced_loss = average_losses_across_data_parallel_group([total_loss])
+        return total_loss * cp_size, {
+            "avg": reduced_loss,
+            **modality_losses
+        }
 
-    def reduce(self, losses_reduced_per_micro_batch) -> torch.Tensor:
-        """Taken from: https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/nlp/models/language_modeling/megatron_gpt_model.py#L535-L552 ."""
+    def reduce(self, losses_reduced_per_micro_batch) -> Dict[str, torch.Tensor]:
+        """Returns both total loss and per-modality losses"""
+        # Calculate total loss (previously done by super().reduce())
         if losses_reduced_per_micro_batch:
             if "avg" in losses_reduced_per_micro_batch[0]:
                 loss_tensors_list = [loss_reduced["avg"] for loss_reduced in losses_reduced_per_micro_batch]
-                loss_tensor = torch.concat(loss_tensors_list)
+                total_loss = torch.concat(loss_tensors_list).mean()
+            else:
+                # Handle validation case
+                loss_sum_tensors_list = [
+                    loss_sum["loss_sum_and_ub_size"]
+                    for loss_sum in losses_reduced_per_micro_batch
+                    if loss_sum["loss_sum_and_ub_size"][1] > 0
+                ]
+                total_loss = (
+                    torch.vstack(loss_sum_tensors_list).sum(dim=0)
+                    if len(loss_sum_tensors_list) > 0
+                    else torch.tensor([0.0, 0.0], device=torch.cuda.current_device())
+                )
+        else:
+            total_loss = torch.tensor(0.0, device=torch.cuda.current_device())
 
-                return loss_tensor.mean()
+        # Calculate modality losses
+        modality_losses = {}
+        if losses_reduced_per_micro_batch:
+            for modality in self.modality_ranges.keys():
+                loss_key = f"{modality}_loss"
+                modality_tensors = [
+                    loss_reduced[loss_key] 
+                    for loss_reduced in losses_reduced_per_micro_batch
+                ]
+                if modality_tensors:
+                    modality_losses[loss_key] = torch.stack(modality_tensors).mean()
+                else:
+                    modality_losses[loss_key] = torch.tensor(0.0, device=torch.cuda.current_device())
 
-            # Get the total loss since micro batches sizes are not uniform
-            loss_sum_tensors_list: List[torch.Tensor] = [
-                loss_sum["loss_sum_and_ub_size"]
-                for loss_sum in losses_reduced_per_micro_batch
-                if loss_sum["loss_sum_and_ub_size"][1] > 0
-            ]
-            loss_sum = (
-                torch.vstack(loss_sum_tensors_list).sum(dim=0)
-                if len(loss_sum_tensors_list) > 0
-                else torch.tensor([0.0, 0.0], device=torch.cuda.current_device())
-            )
-            return loss_sum
-
-        return torch.tensor(0.0, device=torch.cuda.current_device())
-
+        return {
+            "total_loss": total_loss,
+            **modality_losses
+        }
 
 class MaskedTokenLossReductionWithLossMask(MaskedTokenLossReduction):
     def forward(
