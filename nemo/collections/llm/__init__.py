@@ -47,6 +47,8 @@ from nemo.collections.llm.gpt.model import (
     CodeLlamaConfig13B,
     CodeLlamaConfig34B,
     CodeLlamaConfig70B,
+    MultiModalGPTModel,
+    MultiModalGPTConfig,
     Gemma2Config,
     Gemma2Config2B,
     Gemma2Config9B,
@@ -189,6 +191,8 @@ __all__ = [
     "ChatGLM2Config6B",
     "ChatGLM3Config6B",
     "ChatGLMModel",
+    "MultiModalGPTModel",
+    "MultiModalGPTConfig"
     "Qwen2Model",
     "Qwen2Config7B",
     "Qwen2Config",

@@ -107,6 +107,19 @@ from nemo.collections.llm.gpt.model.starcoder2 import (
     Starcoder2Model,
 )
 
+from nemo.collections.llm.gpt.model.starcoder2 import (
+    Starcoder2Config,
+    Starcoder2Config3B,
+    Starcoder2Config7B,
+    Starcoder2Config15B,
+    Starcoder2Model,
+)
+
+from nemo.collections.llm.gpt.model.early_fusion import (
+    MultiModalGPTModel,
+    MultiModalGPTConfig,
+)
+
 __all__ = [
     "GPTConfig",
     "GPTModel",
@@ -188,4 +201,6 @@ __all__ = [
     "transformer_engine_full_layer_spec",
     "local_layer_spec",
     "HfAutoModelForCausalLM",
+    "MultiModalGPTModel",
+    "MultiModalGPTConfig",
 ]

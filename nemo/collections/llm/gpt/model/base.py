@@ -406,22 +406,14 @@ class GPTModel(L.LightningModule, io.IOMixin, io.ConnectorMixin, fn.FNMixin):
     @property
     def training_loss_reduction(self) -> MaskedTokenLossReduction:
         if not self._training_loss_reduction:
-            modality_ranges = {
-            "text": (0, 25000),
-            "image": (25000, 50257)
-            }
-            self._training_loss_reduction = MaskedTokenLossReduction(modality_ranges=modality_ranges)
+            self._training_loss_reduction = MaskedTokenLossReduction()
 
         return self._training_loss_reduction
 
     @property
     def validation_loss_reduction(self) -> MaskedTokenLossReduction:
         if not self._validation_loss_reduction:
-            modality_ranges = {
-            "text": (0, 25000),
-            "image": (25000, 50257)
-            }
-            self._validation_loss_reduction = MaskedTokenLossReduction(modality_ranges=modality_ranges,validation_step=True)
+            self._validation_loss_reduction = MaskedTokenLossReduction(validation_step=True)
 
         return self._validation_loss_reduction
 
