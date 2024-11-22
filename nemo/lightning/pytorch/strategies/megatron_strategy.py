@@ -518,7 +518,7 @@ class MegatronStrategy(DDPStrategy, io.IOMixin):
                 opt.zero_grad()
 
             out = self.model.training_step(dataloader_iter, *args, **kwargs)
-            per_modality_loss = self.model.training_step(dataloader_iter, *args, **kwargs)
+            per_modality_loss = {k: v for k, v in out.items() if k != 'total_loss'}
             out = out['total_loss']
             if torch.is_tensor(out):
                 reduced_train_loss = out
@@ -567,14 +567,9 @@ class MegatronStrategy(DDPStrategy, io.IOMixin):
                     "reduced_train_loss", reduced_train_loss, prog_bar=True, batch_size=1, sync_dist=False
                 )
                 if isinstance(per_modality_loss, dict):
-                    if 'text_loss' in per_modality_loss:
+                    for loss_name, loss_value in per_modality_loss.items():
                         self.lightning_module.log(
-                            "text_loss", per_modality_loss['text_loss'], 
-                            prog_bar=True, batch_size=1, sync_dist=False
-                        )
-                    if 'image_loss' in per_modality_loss:
-                        self.lightning_module.log(
-                            "image_loss", per_modality_loss['image_loss'], 
+                            loss_name, loss_value, 
                             prog_bar=True, batch_size=1, sync_dist=False
                         )
                 # Log any MoE losses.
