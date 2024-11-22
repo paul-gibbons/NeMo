@@ -106,15 +106,6 @@ from nemo.collections.llm.gpt.model.starcoder2 import (
     Starcoder2Config15B,
     Starcoder2Model,
 )
-
-from nemo.collections.llm.gpt.model.starcoder2 import (
-    Starcoder2Config,
-    Starcoder2Config3B,
-    Starcoder2Config7B,
-    Starcoder2Config15B,
-    Starcoder2Model,
-)
-
 from nemo.collections.llm.gpt.model.early_fusion import (
     MultiModalGPTModel,
     MultiModalGPTConfig,
