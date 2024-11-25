@@ -71,7 +71,6 @@ class MultiModalLossReduction(MaskedTokenLossReduction):
             
             modality_losses[f"{modality}_loss"] = modality_loss * cp_size
 
-        # Handle validation step case
         if self.validation_step and not self.val_drop_last:
             num_valid_tokens = batch["loss_mask"].sum()
             if loss_for_ub.isnan():
@@ -139,7 +138,7 @@ class MultiModalLossReduction(MaskedTokenLossReduction):
                     modality_losses[loss_key] = torch.tensor(0.0, device=torch.cuda.current_device())
 
         return {
-            "total_loss": total_loss,
+            "avg": total_loss,
             **modality_losses
         }
 

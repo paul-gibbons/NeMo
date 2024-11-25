@@ -518,8 +518,14 @@ class MegatronStrategy(DDPStrategy, io.IOMixin):
                 opt.zero_grad()
 
             out = self.model.training_step(dataloader_iter, *args, **kwargs)
-            per_modality_loss = {k: v for k, v in out.items() if k != 'total_loss'}
-            out = out['total_loss']
+            if isinstance(out, dict):
+                # Extract per_modality_loss and total_loss
+                per_modality_loss = {k: v for k, v in out.items() if k != 'avg'}
+                out = out['avg']
+            else:
+                # No per_modality_loss, so create an empty dict
+                per_modality_loss = {}
+
             if torch.is_tensor(out):
                 reduced_train_loss = out
             else:
@@ -566,10 +572,10 @@ class MegatronStrategy(DDPStrategy, io.IOMixin):
                 self.lightning_module.log(
                     "reduced_train_loss", reduced_train_loss, prog_bar=True, batch_size=1, sync_dist=False
                 )
-                if isinstance(per_modality_loss, dict):
+                if per_modality_loss:
                     for loss_name, loss_value in per_modality_loss.items():
                         self.lightning_module.log(
-                            loss_name, loss_value, 
+                            loss_name, loss_value,
                             prog_bar=True, batch_size=1, sync_dist=False
                         )
                 # Log any MoE losses.
@@ -608,22 +614,29 @@ class MegatronStrategy(DDPStrategy, io.IOMixin):
         with self.precision_plugin.val_step_context():  # TODO: Do we need this?
             out = self.model.validation_step(dataloader_iter, *args, **kwargs)
 
+            if isinstance(out, dict):
+                # Extract per_modality_loss and total_loss
+                per_modality_loss = {k: v for k, v in out.items() if k != 'avg'}
+                out = out['avg']
+            else:
+                # No per_modality_loss, so create an empty dict
+                per_modality_loss = {}
+            
             from megatron.core import parallel_state
-
             pp_size = parallel_state.get_pipeline_model_parallel_world_size()
             if pp_size > 1:
                 # ranks that are not final pp stage have 0 for loss, and out will be mean-reduced over pp
                 # groups (due to sync_dist), which divides val_loss by pp_size. so we multiply by pp_size to cancel out
                 self.lightning_module.log(
                     "val_loss",
-                    out['total_loss'] * pp_size,
+                    out * pp_size,
                     prog_bar=True,
                     sync_dist=True,
                     sync_dist_group=parallel_state.get_pipeline_model_parallel_group(),
                     on_epoch=True,
                 )
             else:
-                self.lightning_module.log("val_loss", out['total_loss'], prog_bar=True, on_epoch=True)
+                self.lightning_module.log("val_loss", out, prog_bar=True, on_epoch=True)
 
             return out
 
