@@ -45,7 +45,7 @@ from nemo.collections.llm.gpt.model.gemma2 import (
     Gemma2Config27B,
     Gemma2Model,
 )
-from nemo.collections.llm.gpt.model.hf_auto_model_for_causal_lm import HfAutoModelForCausalLM
+from nemo.collections.llm.gpt.model.hf_auto_model_for_causal_lm import HFAutoModelForCausalLM
 from nemo.collections.llm.gpt.model.llama import (
     CodeLlamaConfig7B,
     CodeLlamaConfig13B,
@@ -59,6 +59,8 @@ from nemo.collections.llm.gpt.model.llama import (
     Llama31Config8B,
     Llama31Config70B,
     Llama31Config405B,
+    Llama32Config1B,
+    Llama32Config3B,
     LlamaConfig,
     LlamaModel,
 )
@@ -138,6 +140,8 @@ __all__ = [
     "Llama31Config8B",
     "Llama31Config70B",
     "Llama31Config405B",
+    "Llama32Config1B",
+    "Llama32Config3B",
     "NemotronConfig",
     "Nemotron3Config4B",
     "Nemotron3Config8B",
