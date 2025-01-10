@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, List, Optional
@@ -103,6 +103,41 @@ class MistralModel(GPTModel):
         super().__init__(
             config or MistralConfig7B(), optim=optim, tokenizer=tokenizer, model_transform=model_transform
         )
+        self._validation_step_outputs = []
+    def add_validation_output(self, out):
+        self._validation_step_outputs.append(out)
+
+    def on_validation_epoch_end(self):
+        super().on_validation_epoch_end()
+        data_module = self.trainer.datamodule
+        assert data_module is not None
+        
+        for ds_name, loss in zip(data_module.val_ds_names, self._validation_step_outputs):
+            if ds_name == 'default':
+                loss_name = 'val_loss'
+            else:
+                loss_name = f'val_loss/{ds_name}'
+            logging.info(f'{loss_name}: {loss}')
+
+            from megatron.core import parallel_state
+
+            pp_size = parallel_state.get_pipeline_model_parallel_world_size()
+            if pp_size > 1:
+                # ranks that are not final pp stage have 0 for loss, and out will be mean-reduced over pp
+                # groups (due to sync_dist), which divides val_loss by pp_size. so we multiply by pp_size to cancel out
+                self.log(
+                    loss_name,
+                    loss * pp_size,
+                    prog_bar=True,
+                    sync_dist=True,
+                    sync_dist_group=parallel_state.get_pipeline_model_parallel_group(),
+                    on_epoch=True,
+                )
+            else:
+                self.log(loss_name, loss, prog_bar=True, on_epoch=True)
+
+        # clear the validation step outputs
+        self._validation_step_outputs.clear()
 
 
 @io.model_importer(MistralModel, "hf")

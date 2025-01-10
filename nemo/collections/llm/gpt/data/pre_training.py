@@ -26,12 +26,12 @@ from nemo.lightning.data import WrappedDataLoader
 from nemo.lightning.io.mixin import IOMixin
 from nemo.lightning.pytorch.plugins import MegatronDataSampler
 from nemo.utils.import_utils import safe_import
-
+import re
 _, HAVE_TE = safe_import("transformer_engine")
-
+from megatron.core.datasets.blended_dataset import BlendedDataset
 if TYPE_CHECKING:
     from megatron.core.datasets.gpt_dataset import GPTDatasetConfig
-
+    
     from nemo.collections.common.tokenizers.tokenizer_spec import TokenizerSpec
 
 
@@ -320,9 +320,12 @@ class PreTrainingDataModule(pl.LightningDataModule, IOMixin):
         return self._create_dataloader(self._test_ds, mode="test")
 
     def _create_dataloader(self, dataset, mode, **kwargs) -> WrappedDataLoader:
+        # Initialize standard settings
         self.init_global_step = self.trainer.global_step
         self.data_sampler.init_global_step = self.init_global_step
-        dataloader = WrappedDataLoader(
+        
+        # Create the main dataloader
+        blended_dataloader = WrappedDataLoader(
             mode=mode,
             dataset=dataset,
             num_workers=self.num_workers,
@@ -331,7 +334,38 @@ class PreTrainingDataModule(pl.LightningDataModule, IOMixin):
             collate_fn=getattr(dataset, "collate_fn", data.dataloader.default_collate),
             **kwargs,
         )
-        return dataloader
+
+        # For training mode, return single dataloader
+        if mode == 'train':
+            return blended_dataloader
+
+        # For validation mode, create additional dataloaders
+        assert isinstance(dataset, BlendedDataset), "Expecting a BlendedDataset instance."
+        dataloaders = [blended_dataloader]
+        val_ds_names = ['default']
+
+        def get_dataset_name(dataset_prefix):
+            match = re.search(r'/name=(.*?)/', dataset_prefix)
+            if match:
+                return match.group(1)
+            return dataset_prefix
+
+        for ds in dataset.datasets:
+            logging.info(f'building validation dataloader for dataset: {ds.dataset_path}')
+            dl = WrappedDataLoader(
+                mode=mode,
+                dataset=ds,
+                num_workers=self.num_workers,
+                pin_memory=self.pin_memory,
+                persistent_workers=self.persistent_workers,
+                collate_fn=getattr(dataset, 'collate_fn', data.dataloader.default_collate),
+                **kwargs,
+            )
+            dataloaders.append(dl)
+            val_ds_names.append(get_dataset_name(ds.dataset_path))
+        
+        self.val_ds_names = val_ds_names
+        return dataloaders
 
     @property
     def gpt_dataset_config(self) -> "GPTDatasetConfig":
