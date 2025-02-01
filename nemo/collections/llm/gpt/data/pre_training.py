@@ -271,7 +271,7 @@ class PreTrainingDataModule(pl.LightningDataModule, IOMixin):
             )
 
             # This is to make sure we only have one epoch on every validation iteration
-            num_val_samples = None
+            #num_val_samples = None
 
         train_valid_test_num_samples = [num_train_samples, num_val_samples, num_test_samples]
         self._train_ds, self._validation_ds, self._test_ds = BlendedMegatronDatasetBuilder(
