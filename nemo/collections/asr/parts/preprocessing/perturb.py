@@ -171,18 +171,17 @@ class SpeedPerturbation(Perturbation):
 
 class TimeStretchPerturbation(Perturbation):
     """
-    Time-stretch an audio series by a fixed rate while preserving pitch, based on [1]_, [2]_.
+    Time-stretch an audio series by a fixed rate while preserving pitch, based on [1, 2].
 
     Note:
     This is a simplified implementation, intended primarily for reference and pedagogical purposes.
     It makes no attempt to handle transients, and is likely to produce audible artifacts.
 
-    References
-    ----------
-    .. [1] Ellis, D. P. W. "A phase vocoder in Matlab." Columbia University, 2002.
-       `<http://www.ee.columbia.edu/~dpwe/resources/matlab/pvoc/>`_
-    .. [2] librosa.effects.time_stretch
-       `<https://librosa.org/doc/main/generated/librosa.effects.time_stretch.html>`_
+    Reference
+    [1] [Ellis, D. P. W. “A phase vocoder in Matlab.” Columbia University, 2002.]
+    (http://www.ee.columbia.edu/~dpwe/resources/matlab/pvoc/)
+    [2] [librosa.effects.time_stretch]
+    (https://librosa.github.io/librosa/generated/librosa.effects.time_stretch.html)
 
     Args:
         min_speed_rate: Minimum sampling rate modifier.

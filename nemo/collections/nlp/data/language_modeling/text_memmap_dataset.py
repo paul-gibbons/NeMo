@@ -19,23 +19,13 @@ import os
 import pickle
 import time
 from functools import lru_cache, partial
-from typing import TYPE_CHECKING, Callable, List, Optional, Type
+from typing import Callable, List, Optional, Type
 
 import numpy as np
 import torch
 
 from nemo.core import Dataset
 from nemo.utils import AppState, logging
-
-try:
-    import multistorageclient
-
-    MULTISTORAGECLIENT_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):
-    MULTISTORAGECLIENT_AVAILABLE = False
-
-if TYPE_CHECKING:
-    from nemo.collections.common.tokenizers.tokenizer_spec import TokenizerSpec
 
 __all__ = ["TextMemMapDataset", "CSVMemMapDataset", "build_index_files"]
 __idx_version__ = "0.2"  # index file version
@@ -50,10 +40,7 @@ def _build_index_from_memdata(fn, newline_int):
     Returns a 1D array of ints.
     """
     # use memmap to read file
-    if MULTISTORAGECLIENT_AVAILABLE:
-        mdata = multistorageclient.numpy.memmap(fn, dtype=np.uint8, mode="r")
-    else:
-        mdata = np.memmap(fn, dtype=np.uint8, mode="r")
+    mdata = np.memmap(fn, dtype=np.uint8, mode="r")
     # find newline positions
     midx = np.where(mdata == newline_int)[0]
     midx_dtype = midx.dtype
@@ -126,7 +113,7 @@ class TextMemMapDataset(Dataset):
         if sort_dataset_paths:
             self._files_list = sorted(self._files_list)
 
-        logging.info("Building data files")
+        logging.info(f"Building data files")
         # load all files into memmap
         is_distributed = torch.distributed.is_available() and torch.distributed.is_initialized()
 
@@ -168,12 +155,11 @@ class TextMemMapDataset(Dataset):
         if is_distributed and not _lightning_prepare_data():
             torch.distributed.barrier()
 
-        logging.info("Loading data files")
+        logging.info(f"Loading data files")
         start_time = time.time()
         mdata_midx_list = [self.load_file(fn, index_mapping_dir) for fn in self._files_list]
         logging.info(
-            f"Time loading {len(mdata_midx_list)} mem-mapped files: "
-            f"{datetime.timedelta(seconds=time.time() - start_time)}"
+            f"Time loading {len(mdata_midx_list)} mem-mapped files: {datetime.timedelta(seconds=time.time() - start_time)}"
         )
 
         logging.info("Computing global indices")
@@ -227,8 +213,7 @@ class TextMemMapDataset(Dataset):
             data = self._build_data_from_text(sample)
         except Exception as e:
             logging.error(
-                "Error while building data from text, possible issue with sample expected format "
-                f"(see offending sample below): {e}"
+                f"Error while building data from text, possible issue with sample expected format (see offending sample below): {e}"
             )
             logging.error(f"sample: {sample}, file_id: {file_id}, file_idx: {file_idx}, i: {i}, j: {j}")
             raise e
@@ -236,8 +221,7 @@ class TextMemMapDataset(Dataset):
         return data
 
     def _fetch_sample_from_memmap(self, mdata, i, j):
-        """Fetchs the text sample. Can be overriden by child-classes to support loading of partial samples
-        and alternative decode methods"""
+        """Fetchs the text sample. Can be overriden by child-classes to support loading of partial samples and alternative decode methods"""
         # load text sample by slicing memmap data[i:j]
         text = mdata[i:j].tobytes().decode("utf-8")
 
@@ -266,28 +250,18 @@ class TextMemMapDataset(Dataset):
         idx_fn = _index_fn(fn, index_mapping_dir)
 
         # create data map
-        if MULTISTORAGECLIENT_AVAILABLE:
-            mdata = multistorageclient.numpy.memmap(fn, dtype=np.uint8, mode="r")
-        else:
-            mdata = np.memmap(fn, dtype=np.uint8, mode="r")
+        mdata = np.memmap(fn, dtype=np.uint8, mode="r")
 
         if _index_file_exists(idx_fn):
             # load index file into memory map
-            if MULTISTORAGECLIENT_AVAILABLE:
-                midx = multistorageclient.numpy.load(idx_fn + ".npy", allow_pickle=True, mmap_mode="r")
-            else:
-                midx = np.load(idx_fn + ".npy", allow_pickle=True, mmap_mode="r")
+            midx = np.load(idx_fn + ".npy", allow_pickle=True, mmap_mode="r")
             # test for header
             if len(midx) < self._header_lines:
                 raise RuntimeError(f"Missing header, expected {self._header_lines} header lines")
 
             # load meta info
-            if MULTISTORAGECLIENT_AVAILABLE:
-                with multistorageclient.open(idx_fn + ".info", "rb") as fp:
-                    idx_info_dict = multistorageclient.pickle.load(fp)
-            else:
-                with open(idx_fn + ".info", "rb") as fp:
-                    idx_info_dict = pickle.load(fp)
+            with open(idx_fn + ".info", "rb") as fp:
+                idx_info_dict = pickle.load(fp)
             # test for mismatch in expected newline_int
             if "newline_int" in idx_info_dict:
                 newline_int = idx_info_dict["newline_int"]
@@ -300,8 +274,7 @@ class TextMemMapDataset(Dataset):
             idx_version = idx_info_dict.get("version", "0.0")
             if __idx_version__ != idx_version:
                 raise RuntimeError(
-                    f"Version mismatch: Please delete existing '.{__idx_suffix__}' files. Expected version = "
-                    f"{__idx_version__}, but file version = {idx_version}. File path = {idx_fn}"
+                    f"Version mismatch: Please delete existing '.{__idx_suffix__}' files. Expected version = {__idx_version__}, but file version = {idx_version}. File path = {idx_fn}"
                 )
         else:
             raise ValueError(
@@ -465,14 +438,10 @@ class JSONLMemMapDataset(TextMemMapDataset):
 
 def _index_file_exists(idx_fn):
     """Helper function to test if index file exists"""
-    is_exists = False
-    if MULTISTORAGECLIENT_AVAILABLE:
-        is_exists = multistorageclient.os.path.exists(idx_fn + ".npy") and multistorageclient.os.path.exists(
-            idx_fn + ".info"
-        )
+    if os.path.exists(idx_fn + ".npy") and os.path.exists(idx_fn + ".info"):
+        return True
     else:
-        is_exists = os.path.exists(idx_fn + ".npy") and os.path.exists(idx_fn + ".info")
-    return is_exists
+        return False
 
 
 def _index_fn(fn: str, index_mapping_dir: str) -> str:
@@ -535,16 +504,9 @@ def _build_memmap_index_files(newline_int, build_index_fn, fn, index_mapping_dir
 
         # save index as numpy array to enable memmap reading
         logging.info(f"Saving idx file = {idx_fn}.npy")
-        if MULTISTORAGECLIENT_AVAILABLE:
-            multistorageclient.numpy.save(idx_fn + ".npy", midx, allow_pickle=True)
-        else:
-            np.save(idx_fn + ".npy", midx, allow_pickle=True)
-
+        np.save(idx_fn + ".npy", midx, allow_pickle=True)
         logging.info(f"Saving metadata file = {idx_fn}.info")
-        if MULTISTORAGECLIENT_AVAILABLE:
-            multistorageclient.pickle.dump(data, idx_fn + ".info")
-        else:
-            pickle.dump(data, open(idx_fn + ".info", "wb"))
+        pickle.dump(data, open(idx_fn + ".info", "wb"))
 
         return True
 
@@ -579,8 +541,7 @@ def build_index_files(
         )
 
     logging.info(
-        f"Time building {sum(build_status)} / {len(build_status)} mem-mapped files: "
-        f"{datetime.timedelta(seconds=time.time() - start_time)}"
+        f"Time building {sum(build_status)} / {len(build_status)} mem-mapped files: {datetime.timedelta(seconds=time.time() - start_time)}"
     )
 
 
@@ -645,8 +606,7 @@ class OnlineSampleMapping:
             cache_maxsize (int): Maximum size of the blocks cache for the get_sample_block function.
             seed (int): Seed for the random number generator used for shuffling.
             shuffle (bool): Whether to shuffle the samples.
-            truncate_to_block_boundary (bool): Whether to truncate the last block to the block boundary
-                                               (could drop samples).
+            truncate_to_block_boundary (bool): Whether to truncate the last block to the block boundary (could drop samples).
         """
         self.dataset_size = dataset_size
         self.num_samples = num_samples
@@ -700,11 +660,7 @@ class OnlineSampleMapping:
         self.get_sample_block = lru_cache(maxsize=cache_maxsize, typed=False)(self.get_sample_block)
 
     def __str__(self):
-        return (
-            f"OnlineSampleMapping(dataset_size={self.dataset_size}, num_samples={self.num_samples}, "
-            f"block_size={self.block_size}, cache_maxsize={self.cache_maxsize}, seed={self.seed}, "
-            f"shuffle={self.shuffle}, truncate_to_block_boundary={self.truncate_to_block_boundary})"
-        )
+        return f"OnlineSampleMapping(dataset_size={self.dataset_size}, num_samples={self.num_samples}, block_size={self.block_size}, cache_maxsize={self.cache_maxsize}, seed={self.seed}, shuffle={self.shuffle}, truncate_to_block_boundary={self.truncate_to_block_boundary})"
 
     def __getitem__(self, idx: int) -> int:
         # handle slices

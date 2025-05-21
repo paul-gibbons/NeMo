@@ -282,7 +282,6 @@ def pretrain_recipe_creater(
     wandb_name: str = None,
     name: str = "default",
     fn=pretrain,
-    **kwargs,
 ) -> run.Partial:
     """
     Create a pre-training recipe for a striped hyena model.

@@ -22,7 +22,6 @@ import wrapt
 
 from nemo.core import Model
 from nemo.utils import model_utils
-from nemo.utils.import_utils import UnavailableError
 
 DOMAINS = ['asr', 'tts', 'nlp']
 
@@ -67,10 +66,6 @@ def _get_class_from_path(domain, subdomains, imp):
         else:
             class_ = None
 
-        error = None
-    # UnavailableError is raised for safe import modules and should not be considered import errors
-    except UnavailableError:
-        result = None
         error = None
 
     except Exception:

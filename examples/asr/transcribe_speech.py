@@ -414,7 +414,6 @@ def main(cfg: TranscriptionConfig) -> Union[TranscriptionConfig, List[Hypothesis
                 transcriptions = asr_model.transcribe(
                     audio=filepaths,
                     override_config=override_cfg,
-                    timestamps=cfg.timestamps,
                 )
                 # stop timer, log time
                 timer.stop(device=device)

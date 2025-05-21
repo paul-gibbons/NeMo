@@ -45,8 +45,6 @@ Model Classes
     :show-inheritance:
     :members: transcribe
 
-.. _asr-api-modules:
-
 Modules
 -------
 
@@ -137,8 +135,6 @@ Mixins
     :show-inheritance:
     :members:
 
-.. _asr-api-datasets:
-
 Datasets
 --------
 
@@ -177,8 +173,6 @@ Subword Encoding Datasets
     :show-inheritance:
     :members:
 
-.. _asr-audio-preprocessors:
-
 Audio Preprocessors
 -------------------
 
@@ -189,8 +183,6 @@ Audio Preprocessors
 .. autoclass:: nemo.collections.asr.modules.AudioToMFCCPreprocessor
     :show-inheritance:
     :members:
-
-.. _asr-api-audio-augmentors:
 
 Audio Augmentors
 ----------------
@@ -284,10 +276,6 @@ RNNT Decoding
     :show-inheritance:
     :members:
 
-.. autoclass:: nemo.collections.asr.parts.submodules.rnnt_beam_decoding.BeamBatchedRNNTInfer
-    :show-inheritance:
-    :members:
-
 TDT Decoding
 ~~~~~~~~~~~~~
 
@@ -300,10 +288,6 @@ TDT Decoding
     :members:
 
 .. autoclass:: nemo.collections.asr.parts.submodules.tdt_beam_decoding.BeamTDTInfer
-    :show-inheritance:
-    :members:
-
-.. autoclass:: nemo.collections.asr.parts.submodules.tdt_beam_decoding.BeamBatchedTDTInfer
     :show-inheritance:
     :members:
 

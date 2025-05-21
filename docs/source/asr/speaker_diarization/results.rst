@@ -1,7 +1,7 @@
 Checkpoints
 ===========
 
-There are two main ways to load pretrained checkpoints in NeMo as introduced in the :doc:`ASR checkpoints <../results>` section.
+There are two main ways to load pretrained checkpoints in NeMo as introduced in `loading ASR checkpoints <../results.html#checkpoints>`__.
 In speaker diarization, the diarizer loads checkpoints that are passed through the config file. 
 
 

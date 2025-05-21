@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -118,10 +118,8 @@ def trainer(
             grad_reduce_in_fp32=True,
             overlap_grad_reduce=True,
             overlap_param_gather=True,
-            average_in_collective=True,  # Not supported for custom FSDP for now, need to be set to False if using FSDP
-            data_parallel_sharding_strategy="optim_grads_params",  # For custom FSDP only
+            average_in_collective=True,
         ),
-        fsdp=None,  # Set to 'megatron' to use Megatron FSDP, 'pytorch' to use PyTorch FSDP 2 (WIP)
     )
 
     trainer = run.Config(
@@ -178,6 +176,10 @@ def pretrain_recipe(
         Python API usage:
             >>> recipe = pretrain_recipe(name="llama3_8b_pretrain", num_nodes=2)
             >>> print(recipe)
+
+    Note:
+        For more details on pre-training LLMs with NeMo, see the pre-training
+        guide in the `examples/llm/pretrain/` directory.
     """
     recipe = run.Partial(
         fn,
@@ -236,7 +238,6 @@ def pretrain_performance_optimizations(recipe: run.Partial) -> run.Partial:
     )
 
     recipe.trainer.plugins.grad_reduce_in_fp32 = False
-    recipe.optim.config.use_precision_aware_optimizer = False
 
     return recipe
 
@@ -283,7 +284,9 @@ def finetune_recipe(
             >>> print(recipe)
 
     Note:
-        This recipe uses the SQuAD dataset for fine-tuning.
+        This recipe uses the SQuAD dataset for fine-tuning. For more information
+        on fine-tuning LLMs with NeMo, see the fine-tuning guide in the
+        `examples/llm/finetune/` directory.
     """
     # Default to unpacked data in normal mode and packed data in performance mode
     # once packing recipe is well tested, change this default to true
@@ -381,7 +384,5 @@ def finetune_performance_optimizations(
             100,
         )
     )
-
-    recipe.optim.config.use_precision_aware_optimizer = False
 
     return recipe

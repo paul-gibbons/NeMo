@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .loss import HiddenStateCosineLoss, LogitsKLLoss, MSELoss
+from .loss import LogitsKLLoss
 from .model import DistillationGPTModel
 
-__all__ = ["LogitsKLLoss", "MSELoss", "HiddenStateCosineLoss", "DistillationGPTModel"]
+__all__ = ["LogitsKLLoss", "DistillationGPTModel"]

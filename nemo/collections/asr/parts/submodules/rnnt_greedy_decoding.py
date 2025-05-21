@@ -2673,12 +2673,10 @@ class GreedyTDTInfer(_GreedyRNNTInfer):
 
             if self.preserve_alignments:
                 # convert Ti-th logits into a torch array
-                for i in range(skip):
-                    hypothesis.alignments.append([])  # blank buffer until next timestep
+                hypothesis.alignments.append([])  # blank buffer for next timestep
 
             if self.preserve_frame_confidence:
-                for i in range(skip):
-                    hypothesis.frame_confidence.append([])  # blank buffer for next timestep
+                hypothesis.frame_confidence.append([])  # blank buffer for next timestep
 
             if symbols_added == self.max_symbols:
                 time_idx += 1

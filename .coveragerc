@@ -4,19 +4,9 @@ omit =
     /tmp/*
     /home/TestData/*
     /workspace/Megatron-LM/*
-    nemo/collections/multimodal/*
-    nemo/collections/multimodal_autoregressive/*
-    nemo/collections/vision/*
-    nemo/collections/diffusion/*
     nemo/collections/nlp/*
-
-    nemo/collections/asr/*
-    nemo/collections/audio/*
-    nemo/collections/speechlm/*
-    nemo/collections/tts/*
-
-    nemo/core/*
-    nemo/collections/common/*      
+    nemo/collections/multimodal/*
+    nemo/collections/vision/*
 
 [paths]
 source =

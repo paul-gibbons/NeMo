@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -245,6 +245,7 @@ class AudioTextDataset(TextProcessing, Dataset):
             :note: below args are for miscellaneous purposes
 
         context_file: Optional[Union[List[str], str]] = None, if provided, will use this file to load random questions from, if question is not in manifest.
+        sample_alpha: Optional[float] = None, for SPE subword sampling
         audio_locator: Optional[str] = None, a special string to split the context into multiple audio segments.
     """
 
@@ -280,6 +281,7 @@ class AudioTextDataset(TextProcessing, Dataset):
         answer_key: str = 'answer',
         end_string: Optional[str] = None,
         context_file: Optional[Union[List[str], str]] = None,
+        sample_alpha: Optional[float] = None,
         audio_locator: Optional[str] = None,
         add_boa_eoa: Optional[bool] = False,
         boa_string: Optional[str] = "<BOA>",
@@ -304,6 +306,7 @@ class AudioTextDataset(TextProcessing, Dataset):
             context_key=context_key,
             answer_key=answer_key,
             end_string=end_string,
+            sample_alpha=sample_alpha,
             audio_locator=audio_locator,
             add_boa_eoa=add_boa_eoa,
             boa_string=boa_string,
@@ -648,6 +651,7 @@ class TarredAudioTextDataset(TextProcessing, IterableDataset):
             :note: Below args are for miscellaneous purposes
 
         context_file: Optional[Union[List[str], str]] = None, if provided, will use this file to load random questions from, if question is not in manifest.
+        sample_alpha: Optional[float] = None, for SPE subword sampling
 
     """
 
@@ -685,6 +689,7 @@ class TarredAudioTextDataset(TextProcessing, IterableDataset):
         answer_key: str = 'answer',
         end_string: Optional[str] = None,
         context_file: Optional[Union[List[str], str]] = None,
+        sample_alpha: Optional[float] = None,
     ):
         super().__init__(
             tokenizer=tokenizer,
@@ -705,6 +710,7 @@ class TarredAudioTextDataset(TextProcessing, IterableDataset):
             context_key=context_key,
             answer_key=answer_key,
             end_string=end_string,
+            sample_alpha=sample_alpha,
         )
         self.is_megatron_iterable = True
         self.shard_manifests = shard_manifests
@@ -933,6 +939,7 @@ def get_tarred_audio_text_dataset(
             context_key=config.get('context_key', 'context'),
             answer_key=config.get('answer_key', 'answer'),
             end_string=config.get('end_string', None),
+            sample_alpha=config.get('sample_alpha', None),
             context_file=config.get('context_file', None),
         )
 
@@ -1135,6 +1142,7 @@ def get_audio_text_dataset_from_config(
             context_key=config.get('context_key', 'context'),
             answer_key=config.get('answer_key', 'answer'),
             end_string=config.get('end_string', None),
+            sample_alpha=config.get('sample_alpha', None),
             context_file=context_file,
             audio_locator=config.get('audio_locator', None),
             add_boa_eoa=config.get('add_boa_eoa', False),

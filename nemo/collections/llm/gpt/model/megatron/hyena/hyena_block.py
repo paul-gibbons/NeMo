@@ -17,12 +17,11 @@
 
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Union
 
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.dist_checkpointing.mapping import ShardedStateDict
 from megatron.core.dist_checkpointing.utils import replace_prefix_for_sharding
-from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
@@ -179,7 +178,7 @@ class HyenaStack(MegatronModule):
                         hidden_states=hidden_states,
                         attention_mask=attention_mask,
                         rotary_pos_emb=rotary_pos_emb,
-                        inference_context=None,
+                        inference_params=None,
                     )
                     if isinstance(hidden_states, tuple):
                         hidden_states = hidden_states[0]
@@ -247,7 +246,7 @@ class HyenaStack(MegatronModule):
         self,
         hidden_states: Tensor,
         attention_mask: Tensor,
-        inference_context: Optional[BaseInferenceContext] = None,
+        inference_params=None,
         rotary_pos_emb: Tensor = None,
     ):
         """Forward pass for the HyenaStack."""
@@ -302,7 +301,7 @@ class HyenaStack(MegatronModule):
                     hidden_states = layer(
                         hidden_states,
                         attention_mask,
-                        inference_context=inference_context,
+                        inference_params=inference_params,
                         rotary_pos_emb=rotary_pos_emb,
                     )
 

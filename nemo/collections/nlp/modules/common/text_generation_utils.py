@@ -11,9 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# flake8: noqa
-# pylint: skip-file
 
 """Utilities for generating text."""
 
@@ -321,9 +318,7 @@ def megatron_neva_generate(model, prompt_dict_list, length_params, sampling_para
 
 
 def get_computeprob_response(tokenizer, response, inputs):
-    if parallel_state.is_pipeline_first_stage(ignore_virtual=True) or parallel_state.is_pipeline_last_stage(
-        ignore_virtual=True
-    ):
+    if parallel_state.is_pipeline_first_stage() or parallel_state.is_pipeline_last_stage():
         # we only have a response on the first and last pipeline stages
         compute_prob_response = {}
         new_token_ids = []
@@ -636,7 +631,7 @@ def synced_generate(
     for tokens, lengths, output_logits, full_logits in batch_token_iterator:
         context_length += 1
 
-    if parallel_state.is_pipeline_last_stage(ignore_virtual=True):
+    if parallel_state.is_pipeline_last_stage():
         src = parallel_state.get_pipeline_model_parallel_last_rank()
         group = parallel_state.get_embedding_group()
         if compute_logprob:
@@ -647,7 +642,7 @@ def synced_generate(
             torch.distributed.broadcast(full_logits, src, group)
 
     else:
-        if parallel_state.is_pipeline_first_stage(ignore_virtual=True):
+        if parallel_state.is_pipeline_first_stage():
             src = parallel_state.get_pipeline_model_parallel_last_rank()
             group = parallel_state.get_embedding_group()
 
@@ -973,7 +968,7 @@ def sample_sequence_batch(
                 )
             output = inference_strategy.forward_step(batch, tensor_shape)
 
-            if parallel_state.is_pipeline_last_stage(ignore_virtual=True):
+            if parallel_state.is_pipeline_last_stage():
 
                 if compute_logprob:
                     output = output[0]['logits']
@@ -1076,7 +1071,7 @@ def sample_sequence_batch(
                     yield tokens, lengths, None, None
 
             else:
-                if parallel_state.is_pipeline_first_stage(ignore_virtual=True):
+                if parallel_state.is_pipeline_first_stage():
                     src = parallel_state.get_pipeline_model_parallel_last_rank()
                     group = parallel_state.get_embedding_group()
                     new_tokens = torch.empty_like(tokens[:, context_length])
@@ -1166,7 +1161,7 @@ def tab_sample_sequence_batch(
             )
             output = inference_strategy.forward_step(batch, tensor_shape)
 
-            if parallel_state.is_pipeline_last_stage(ignore_virtual=True):
+            if parallel_state.is_pipeline_last_stage():
                 output = output[0]['logits'].float()
                 output = tensor_parallel.gather_from_tensor_model_parallel_region(output)
                 assert output is not None
@@ -1234,7 +1229,7 @@ def tab_sample_sequence_batch(
                     yield tokens, lengths, output_logits, None
 
             else:
-                if parallel_state.is_pipeline_first_stage(ignore_virtual=True):
+                if parallel_state.is_pipeline_first_stage():
                     src = parallel_state.get_pipeline_model_parallel_last_rank()
                     group = parallel_state.get_embedding_group()
                     new_tokens = torch.empty_like(tokens[:, context_length])

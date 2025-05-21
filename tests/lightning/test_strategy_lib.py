@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -41,9 +41,7 @@ def test_set_model_parallel_attributes() -> None:
 
     class DummyModel:
         def __init__(self):
-            self.config = TransformerConfig(
-                hidden_size=128, num_attention_heads=2, num_layers=2, num_moe_experts=2, add_bias_linear=False
-            )
+            self.config = TransformerConfig(hidden_size=128, num_attention_heads=2, num_layers=2, num_moe_experts=2)
 
         def configure_model(self):
             pass
@@ -129,7 +127,6 @@ def test_init_model_parallel(mock_mpu, *args):
     app_state.tensor_model_parallel_size = 2
     app_state.pipeline_model_parallel_size = 1
     app_state.pipeline_model_parallel_split_rank = None
-    app_state.pipeline_model_parallel_comm_backend = None
     app_state.context_parallel_size = 2
     app_state.expert_model_parallel_size = 2
     app_state.expert_tensor_parallel_size = 1
@@ -146,16 +143,12 @@ def test_init_model_parallel(mock_mpu, *args):
         pipeline_model_parallel_size=1,
         virtual_pipeline_model_parallel_size=None,
         pipeline_model_parallel_split_rank=None,
-        pipeline_model_parallel_comm_backend=None,
         encoder_pipeline_model_parallel_size=None,
         encoder_tensor_model_parallel_size=None,
         context_parallel_size=2,
         expert_model_parallel_size=2,
         expert_tensor_parallel_size=1,
-        use_sharp=False,
         order="tp-cp-ep-dp-pp",
-        num_distributed_optimizer_instances=1,
-        nccl_communicator_config_path=None,
     )
 
 
@@ -169,7 +162,6 @@ def test_init_model_parallel_with_tp_pp_dp(mock_mpu, *args):
     app_state.tensor_model_parallel_size = 2
     app_state.pipeline_model_parallel_size = 1
     app_state.pipeline_model_parallel_split_rank = None
-    app_state.pipeline_model_parallel_comm_backend = None
     app_state.context_parallel_size = 2
     app_state.expert_model_parallel_size = 2
     app_state.expert_tensor_parallel_size = 1
@@ -188,16 +180,12 @@ def test_init_model_parallel_with_tp_pp_dp(mock_mpu, *args):
         pipeline_model_parallel_size=1,
         virtual_pipeline_model_parallel_size=None,
         pipeline_model_parallel_split_rank=None,
-        pipeline_model_parallel_comm_backend=None,
         encoder_pipeline_model_parallel_size=None,
         encoder_tensor_model_parallel_size=None,
         context_parallel_size=2,
         expert_model_parallel_size=2,
         expert_tensor_parallel_size=1,
-        use_sharp=False,
         order="tp-cp-ep-pp-dp",
-        num_distributed_optimizer_instances=1,
-        nccl_communicator_config_path=None,
     )
 
 

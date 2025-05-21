@@ -20,7 +20,6 @@ import nemo_run as run
 
 from nemo.collections.llm.api import finetune, pretrain
 from nemo.collections.llm.gpt.data.mock import MockDataModule
-from nemo.collections.llm.gpt.data.packed_sequence import PackedSequenceSpecs
 from nemo.collections.llm.gpt.model.deepseek import DeepSeekModel, DeepSeekV2LiteConfig
 from nemo.collections.llm.peft import PEFT_STR2CLS
 from nemo.collections.llm.recipes.deepseek import trainer
@@ -91,8 +90,7 @@ def pretrain_recipe(
         fn,
         model=model(),
         trainer=trainer(
-            tensor_parallelism=1,
-            expert_parallelism=8,
+            tensor_parallelism=4,
             num_nodes=num_nodes,
             num_gpus_per_node=num_gpus_per_node,
             callbacks=[run.Config(TimingCallback)],
@@ -102,11 +100,6 @@ def pretrain_recipe(
         optim=distributed_fused_adam_with_cosine_annealing(max_lr=3e-4),
         resume=default_resume(),
     )
-
-    # Use DeepEP
-    recipe.model.config.moe_token_dispatcher_type = "flex"
-    recipe.model.config.moe_enable_deepep = True
-    recipe.model.config.moe_shared_expert_overlap = False
 
     return recipe
 
@@ -160,7 +153,10 @@ def finetune_recipe(
         seq_length = 2048
 
     if num_nodes is None:
-        num_nodes = 1
+        if peft_scheme is None or peft_scheme.lower() == 'none':
+            num_nodes = 16
+        elif peft_scheme.lower() in ['lora', 'dora']:
+            num_nodes = 2
 
     recipe = default_finetune_recipe(
         model(), "deepseek-ai/DeepSeek-V2-Lite", dir, name, num_nodes, num_gpus_per_node, packed_sequence
@@ -187,6 +183,6 @@ def finetune_recipe(
     recipe.model.config.seq_length = seq_length
     recipe.data.seq_length = seq_length
     if packed_sequence:
-        recipe.data.dataset_kwargs = {'pad_to_max_length': True}
-        recipe.data.packed_sequence_specs = run.Config(PackedSequenceSpecs, packed_sequence_size=seq_length)
+        raise ValueError("Packed sequence for DeepSeek is not yet supported. Please set packed_sequence=False.")
+
     return recipe

@@ -11,9 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# flake8: noqa
-# pylint: skip-file
 
 import os
 from functools import partial
@@ -1017,7 +1014,7 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
                     else:
                         batch[k] = batch[k].cuda(non_blocking=True)
             else:
-                if parallel_state.is_pipeline_first_stage(ignore_virtual=False):
+                if parallel_state.is_pipeline_first_stage():
                     # First pipeline stage needs tokens, position_ids, and attention_mask
                     for k in batch.keys():
                         if self.get_attention_mask_from_fusion:
@@ -1032,7 +1029,7 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
                                 if k in ['tokens', 'position_ids', 'attention_mask', 'media', 'cu_seqlens']
                                 else None
                             )
-                elif parallel_state.is_pipeline_last_stage(ignore_virtual=False):
+                elif parallel_state.is_pipeline_last_stage():
                     # Last pipeline stage needs the labels, loss_mask, and attention_mask
                     for k in batch.keys():
                         if self.get_attention_mask_from_fusion:
@@ -1140,7 +1137,7 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
             # Advance inference sequence offset.
             if self.inference_params:
                 # if last stage, then (final) output is [b, s, h], otherwise it's [s, b, h]
-                if parallel_state.is_pipeline_last_stage(ignore_virtual=True):
+                if parallel_state.is_pipeline_last_stage():
                     self.inference_params.sequence_len_offset += output_tensor.size(1)
                 else:
                     self.inference_params.sequence_len_offset += output_tensor.size(0)
@@ -1159,7 +1156,7 @@ class MegatronNevaModel(MultimodalAdapterModelMixin, MegatronGPTModel):
         if not self.validation_step_outputs:
             return
 
-        if parallel_state.is_pipeline_last_stage(ignore_virtual=False):
+        if parallel_state.is_pipeline_last_stage():
             # only the last pipeline parallel stages return loss with their batch size
             if self.cfg.data.get('validation_drop_last', True):
                 averaged_loss = torch.stack(self.validation_step_outputs).mean()

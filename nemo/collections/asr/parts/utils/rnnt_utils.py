@@ -106,7 +106,7 @@ class Hypothesis:
     ngram_lm_state: Optional[Union[Dict[str, Any], List[Any]]] = None
     tokens: Optional[Union[List[int], torch.Tensor]] = None
     last_token: Optional[torch.Tensor] = None
-    token_duration: Optional[torch.Tensor] = None
+    token_duration: Optional[List[int]] = None
     last_frame: Optional[int] = None
 
     @property
@@ -655,7 +655,7 @@ def batched_hyps_to_hypotheses(
                 if not torch.all(
                     (durations := batched_hyps.token_durations[i, : batched_hyps.current_lengths[i]]) == 0
                 )
-                else torch.empty(0)
+                else []
             ),
             alignments=None,
             dec_state=None,

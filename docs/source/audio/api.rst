@@ -55,12 +55,10 @@ Masking
     :show-inheritance:
     :members:
 
-.. _audio-api-masking-multi-channel-mask-estimator:
 .. autoclass:: nemo.collections.audio.modules.masking.MaskEstimatorFlexChannels
     :show-inheritance:
     :members:
 
-.. _audio-api-masking-guided-source-separation:
 .. autoclass:: nemo.collections.audio.modules.masking.MaskEstimatorGSS
     :show-inheritance:
     :members:
@@ -97,12 +95,10 @@ SSL Pretraining
 Transforms
 ~~~~~~~~~~
 
-.. _audio-api-audio-to-spectrogram:
 .. autoclass:: nemo.collections.audio.modules.transforms.AudioToSpectrogram
     :show-inheritance:
     :members:
 
-.. _audio-api-spectrogram-to-audio:
 .. autoclass:: nemo.collections.audio.modules.transforms.SpectrogramToAudio
     :show-inheritance:
     :members:
