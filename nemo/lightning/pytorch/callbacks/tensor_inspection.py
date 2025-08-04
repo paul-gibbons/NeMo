@@ -28,15 +28,16 @@ class TensorInspectConfig:
         self.feature_dirs = feature_dirs
 
         # Validate that each feature has required base fields
-        for feature_name, feature_config in features.items():
-            if not isinstance(feature_config, dict):
-                raise ValueError(f"Feature {feature_name} configuration must be a dictionary")
+        #for feature_name, feature_config in features.items():
+        #    if not isinstance(feature_config, dict):
+        #       raise ValueError(f"Feature {feature_name} configuration must be a dictionary")
+        #
+        #    if 'enabled' not in feature_config:
+        #        raise ValueError(f"Feature {feature_name} must have 'enabled' field")
+        #
+        #    if 'layers' not in feature_config:
+        #        raise ValueError(f"Feature {feature_name} must have 'layers' configuration")
 
-            if 'enabled' not in feature_config:
-                raise ValueError(f"Feature {feature_name} must have 'enabled' field")
-
-            if 'layers' not in feature_config:
-                raise ValueError(f"Feature {feature_name} must have 'layers' configuration")
 
     @property
     def multi_tensor_stat_collection(self):
@@ -46,6 +47,9 @@ class TensorInspectConfig:
     def transformer_engine(self):
         return self.features.get('transformer_engine', {})
 
+    @property
+    def fp8_tensor_stat_collection(self):
+        return self.features.get('fp8_tensor_stat_collection', {})
 
 class TensorInspectCallback(Callback):
     def __init__(self, config: TensorInspectConfig):
@@ -66,7 +70,9 @@ class TensorInspectCallback(Callback):
         if not self.debug_setup_done:
             # Configure additional loggers from available trainer loggers
             for logger in trainer.loggers:
-                if isinstance(logger, PLWandbLogger):
+                #print the loggers in trainer and it's types for debugging\
+                logging.info(f"Available logger: {logger} of type {type(logger)}")
+                if isinstance(logger, PLWandbLogger) or 'WandbLogger' in str(type(logger)):
                     from nvdlfw_inspect.logging import MetricLogger, wrap_wandb_logger
 
                     wandb_logger = wrap_wandb_logger(logger)
